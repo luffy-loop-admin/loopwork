@@ -11,6 +11,18 @@ export function parseSpreadsheetId(url: string): string | null {
 export function serviceAccountEmail(): string {
   return process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? '';
 }
+function normalizeKey(raw: string): string {
+  const body = raw
+    .replace(/\\n/g, '\n')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/, '')
+    .replace(/-----END [A-Z ]*PRIVATE KEY-----/, '')
+    .replace(/["',\s]/g, '');
+  if (body.length < 1000) {
+    throw new Error('GOOGLE_PRIVATE_KEY looks cut off or incomplete. Paste the full private_key value from the JSON file.');
+  }
+  const lines = body.match(/.{1,64}/g) ?? [];
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`;
+}
 
 let jwt: JWT | null = null;
 function getClient(): JWT {
@@ -20,7 +32,7 @@ function getClient(): JWT {
     if (!email || !key) {
       throw new Error('Google service account is not configured (GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_PRIVATE_KEY).');
     }
-    key = key.trim().replace(/^"|"$/g, '').replace(/\\n/g, '\n');
+    key = normalizeKey(key);
     jwt = new JWT({ email, key, scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] });
   }
   return jwt;
