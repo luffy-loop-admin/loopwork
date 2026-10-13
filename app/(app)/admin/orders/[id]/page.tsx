@@ -10,7 +10,7 @@ export default async function EditOrderPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const supabase = await createClient();
   const [{ data: order }, { data: vendors }] = await Promise.all([
-    supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status').eq('id', id).maybeSingle(),
+    supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url').eq('id', id).maybeSingle(),
     supabase.from('vendors').select('id,name').order('name'),
   ]);
   if (!order) notFound();

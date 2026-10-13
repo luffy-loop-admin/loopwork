@@ -116,6 +116,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                         <dt className="text-muted">Live link</dt>
                         <dd className="break-all">
                           {o.live_url ? <a className="link" href={o.live_url} target="_blank" rel="noopener noreferrer nofollow">{o.live_url}</a> : <span className="text-muted">No live link yet</span>}
+                          {o.article_url && /^https?:\/\//i.test(o.article_url) && (
+                            <div className="mt-1"><a className="link text-xs" href={o.article_url} target="_blank" rel="noopener noreferrer nofollow">Article doc</a></div>
+                          )}
+                          {o.pair && <div className="mt-0.5 text-xs text-muted">Pair: {o.pair}</div>}
                         </dd>
                       </div>
                       {isAdmin && (

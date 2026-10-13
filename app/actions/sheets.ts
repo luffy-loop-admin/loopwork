@@ -35,7 +35,9 @@ export async function saveSource(formData: FormData): Promise<ActionResult> {
     if (v) mapping[f.key] = v;
     else if (f.required) return { ok: false, message: `Choose which column holds "${f.label}". Click "Load columns" first.` };
   }
-  if (kind === 'orders' && !mapping.site && !mapping.live_url) return { ok: false, message: 'Map the website column or the live link column.' };
+  if ((kind === 'orders' || kind === 'vendor') && !mapping.site && !mapping.live_url) {
+    return { ok: false, message: 'Map the website column or the live link column.' };
+  }
 
   const row = {
     kind,

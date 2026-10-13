@@ -2,18 +2,27 @@ export type SheetKind = 'vendor' | 'orders' | 'payments';
 export type FieldDef = { key: string; label: string; required?: boolean; hint?: string; guess: RegExp };
 
 export const VENDOR_FIELDS: FieldDef[] = [
-  { key: 'site', label: 'Website / domain', required: true, guess: /site|website|domain|url|web/i },
-  { key: 'price', label: 'Price (PKR)', required: true, guess: /price|cost|rate|fee/i },
+  { key: 'site', label: 'Website / domain', hint: 'Optional if you map the live link. Needed for rows without a live link.', guess: /^site|website|domain/i },
+  { key: 'price', label: 'Price (PKR)', hint: 'Optional. Price or cost for the guest post / site.', guess: /price|cost|rate|fee|amount/i },
+  { key: 'live_url', label: 'Live link URL', hint: 'Optional. Published guest post URL.', guess: /live|^link$|^url$|published url/i },
+  { key: 'status', label: 'Status (Indexed / Not indexed)', hint: 'Optional. Status from the sheet (e.g. Indexed, Live).', guess: /status|index/i },
+  { key: 'date', label: 'Date / Order date', hint: 'Optional. Date of the post or order.', guess: /date|ordered|bought|purchase/i },
+  { key: 'article', label: 'Article doc link (DOC)', hint: 'Optional. Link to the article document / Google Doc.', guess: /article|doc/i },
+  { key: 'pair', label: 'Pair', hint: 'Optional. Saved as text.', guess: /pair/i },
+  { key: 'vendor', label: 'Vendor', hint: 'Optional. Overrides the selected vendor if specified in sheet.', guess: /vendor|seller|supplier|source/i },
   { key: 'currency', label: 'Currency', hint: 'Optional. Leave unused and PKR is assumed.', guess: /currency|curr/i },
   { key: 'da', label: 'DA', guess: /^da$|domain authority|moz/i },
   { key: 'dr', label: 'DR', guess: /^dr$|domain rating|ahrefs/i },
   { key: 'traffic', label: 'Traffic', guess: /traffic|visits|visitors/i },
   { key: 'niche', label: 'Niche / category', guess: /niche|category|topic|genre/i },
+  { key: 'notes', label: 'Notes', guess: /note|comment|remark/i },
 ];
 
 export const ORDER_FIELDS: FieldDef[] = [
-  { key: 'site', label: 'Website / domain', hint: 'Needed unless the live link column is mapped.', guess: /^site|website|domain/i },
-  { key: 'live_url', label: 'Live link URL', hint: 'Map this and/or the website column.', guess: /live|link|post url|article|published/i },
+  { key: 'site', label: 'Website / domain', hint: 'Optional if you map the live link. Needed for orders that are not live yet.', guess: /^site|website|domain/i },
+  { key: 'live_url', label: 'Live link URL', hint: 'The website is taken from this link when no Website column is mapped.', guess: /live|^link$|^url$|published url/i },
+  { key: 'pair', label: 'Pair', hint: 'Optional. Saved as text and shown next to the order.', guess: /pair/i },
+  { key: 'article', label: 'Article doc link (DOC)', hint: 'Optional. Link to the article document / Google Doc.', guess: /article|doc/i },
   { key: 'vendor', label: 'Vendor', guess: /vendor|seller|supplier|source/i },
   { key: 'date', label: 'Order date', guess: /date|ordered|bought|purchase/i },
   { key: 'price', label: 'Price (PKR)', guess: /price|cost|amount|payment|paid/i },

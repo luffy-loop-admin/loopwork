@@ -10,6 +10,7 @@ export type OrderHit = {
   id: string; domain: string; live_url: string | null; vendor_id: string | null; vendor_name: string | null;
   order_date: string | null; price_paid: number | null; currency: string | null;
   indexed_status: 'pending' | 'indexed' | 'not_indexed'; last_checked_at: string | null;
+  pair?: string | null; article_url?: string | null;
 };
 
 export type DomainResult = { domain: string; offers: SiteHit[]; orders: OrderHit[] };
@@ -31,7 +32,7 @@ export async function searchDomains(supabase: SupabaseClient, domains: string[])
         .limit(5000),
       supabase
         .from('orders')
-        .select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,indexed_status,last_checked_at')
+        .select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,indexed_status,last_checked_at,pair,article_url')
         .in('domain', chunk)
         .order('order_date', { ascending: false, nullsFirst: false })
         .limit(5000),

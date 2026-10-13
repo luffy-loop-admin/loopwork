@@ -2,7 +2,7 @@ type Vendor = { id: string; name: string };
 type Order = {
   id?: string; domain?: string; live_url?: string | null; vendor_id?: string | null; vendor_name?: string | null;
   order_date?: string | null; price_paid?: number | null; currency?: string | null; notes?: string | null;
-  order_status?: string | null; indexed_status?: string | null;
+  order_status?: string | null; indexed_status?: string | null; pair?: string | null; article_url?: string | null;
 };
 
 /** Inputs shared by "Add / assign order" and "Edit order". Rendered inside an <ActionForm>. Pass a partial `order` to pre-fill. */
@@ -62,6 +62,14 @@ export default function OrderFields({ vendors, order, after }: { vendors: Vendor
           <option value="indexed">Indexed</option>
           <option value="not_indexed">Not indexed</option>
         </select>
+      </div>
+      <div>
+        <label className="label" htmlFor="pair">Pair</label>
+        <input id="pair" name="pair" className="input" defaultValue={order?.pair ?? ''} />
+      </div>
+      <div>
+        <label className="label" htmlFor="article_url">Article doc link</label>
+        <input id="article_url" name="article_url" className="input" defaultValue={order?.article_url ?? ''} autoCapitalize="none" />
       </div>
       <div>
         <label className="label" htmlFor="notes">Notes</label>

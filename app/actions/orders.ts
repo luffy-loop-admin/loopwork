@@ -49,6 +49,8 @@ export async function saveOrder(formData: FormData): Promise<ActionResult> {
     price_paid: parseMoney(str(formData, 'price_paid')),
     currency: (str(formData, 'currency') || CURRENCY).toUpperCase().slice(0, 3),
     notes: str(formData, 'notes') || null,
+    pair: str(formData, 'pair') || null,
+    article_url: str(formData, 'article_url') || null,
     order_status: orderStatus,
     updated_at: new Date().toISOString(),
   };

@@ -16,7 +16,7 @@ export default async function VendorOrdersPage({ searchParams }: { searchParams:
   const supabase = await createClient();
   const { data, count } = await supabase
     .from('orders')
-    .select('id,domain,live_url,order_date,price_paid,currency,order_status,notes', { count: 'exact' })
+    .select('id,domain,live_url,order_date,price_paid,currency,order_status,notes,pair,article_url', { count: 'exact' })
     .order('order_date', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
@@ -41,11 +41,19 @@ export default async function VendorOrdersPage({ searchParams }: { searchParams:
           <tbody>
             {rows.map((o) => (
               <tr key={o.id}>
-                <td className="td font-medium">{o.domain}</td>
+                <td className="td font-medium">
+                  {o.domain}
+                  {o.pair && <div className="text-xs font-normal text-muted" title={o.pair}>Pair: {o.pair}</div>}
+                </td>
                 <td className="td">{fmtDate(o.order_date)}</td>
                 <td className="td">{money(o.price_paid, o.currency)}</td>
                 <td className="td"><span className={`badge ${BADGE[o.order_status] ?? BADGE.ordered}`}>{LABEL[o.order_status] ?? o.order_status}</span></td>
-                <td className="td max-w-[16rem] break-all">{o.live_url ? <a className="link" href={o.live_url} target="_blank" rel="noopener noreferrer nofollow">{o.live_url}</a> : '-'}</td>
+                <td className="td max-w-[16rem] break-all">
+                  {o.live_url ? <a className="link" href={o.live_url} target="_blank" rel="noopener noreferrer nofollow">{o.live_url}</a> : '-'}
+                  {o.article_url && /^https?:\/\//i.test(o.article_url) && (
+                    <div><a className="link text-xs" href={o.article_url} target="_blank" rel="noopener noreferrer nofollow">Article doc</a></div>
+                  )}
+                </td>
                 <td className="td">{o.notes ?? '-'}</td>
               </tr>
             ))}

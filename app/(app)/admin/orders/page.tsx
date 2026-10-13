@@ -34,7 +34,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
   let query = supabase
     .from('orders')
-    .select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,sheet_status,last_checked_at,index_error,source_tab', { count: 'exact' })
+    .select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,sheet_status,last_checked_at,index_error,source_tab,pair,article_url', { count: 'exact' })
     .order('order_date', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
@@ -113,13 +113,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           <tbody>
             {rows.map((o) => (
               <tr key={o.id}>
-                <td className="td font-medium">{o.domain}{o.source_tab && <div className="text-xs font-normal text-muted">{o.source_tab}</div>}</td>
+                <td className="td font-medium">{o.domain}{o.pair && <div className="max-w-[14rem] truncate text-xs font-normal text-muted" title={o.pair}>Pair: {o.pair}</div>}{o.source_tab && <div className="text-xs font-normal text-muted">{o.source_tab}</div>}</td>
                 <td className="td">{o.vendor_name ?? '-'}</td>
                 <td className="td">{fmtDate(o.order_date)}</td>
                 <td className="td">{money(o.price_paid, o.currency)}</td>
                 <td className="td"><span className={`badge ${ORDER_BADGE[o.order_status] ?? ORDER_BADGE.ordered}`}>{ORDER_LABEL[o.order_status] ?? o.order_status}</span></td>
                 <td className="td max-w-[16rem] break-all">
                   {o.live_url ? <a className="link" href={o.live_url} target="_blank" rel="noopener noreferrer nofollow">{o.live_url}</a> : <span className="text-muted">-</span>}
+                  {o.article_url && /^https?:\/\//i.test(o.article_url) && <div><a className="link text-xs" href={o.article_url} target="_blank" rel="noopener noreferrer nofollow">Article doc</a></div>}
                 </td>
                 <td className="td"><StatusBadge status={o.indexed_status} hasLink={!!o.live_url} error={o.index_error} /></td>
                 <td className="td text-muted">{o.sheet_status === 'indexed' ? 'Indexed' : o.sheet_status === 'not_indexed' ? 'Not indexed' : '-'}</td>
