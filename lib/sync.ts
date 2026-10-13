@@ -23,7 +23,8 @@ const CHUNK = 500;
 const cell = (row: unknown[], idx: number): unknown => (idx >= 0 ? row[idx] : undefined);
 
 function summary(label: string, rows: number, tabs: string[], skippedTabs: string[], skippedRows: number, missing: string[]): string {
-  const parts = [label.includes(String(rows)) ? label : `${rows} ${label}`];
+  const text = /synced|imported/i.test(label) ? label : `${rows} ${label}`;
+  const parts = [text];
   if (tabs.length > 1) parts.push(`from ${tabs.length} tabs`);
   let msg = parts.join(' ') + (skippedRows ? `, ${skippedRows} rows skipped` : '') + '.';
   if (skippedTabs.length) msg += ` Skipped tabs without the mapped columns: ${skippedTabs.join(', ')}.`;
@@ -50,9 +51,14 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
     vendor_name: string | null; order_date: string | null; price_paid: number | null; currency: string; notes: string | null;
     sheet_status: 'indexed' | 'not_indexed' | null; order_status: 'live' | 'ordered'; pair: string | null; article_url: string | null;
   };
+  type PayRec = {
+    source_id: string; source_key: string; vendor_id: string | null; vendor_name: string | null;
+    amount: number; currency: string; paid_date: string; method: string; notes: string | null;
+  };
 
   const sitesMap = new Map<string, SiteRec>();
   const ordersMap = new Map<string, OrderRec>();
+  const paymentsMap = new Map<string, PayRec>();
   const usedTabs: string[] = [];
   const skippedTabs: string[] = [];
   let skipped = 0;
@@ -77,10 +83,6 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
       const live = cleanUrl(cell(r, idx.live));
       const rawSite = cell(r, idx.site);
       const domain = normalizeDomain(rawSite) ?? (live ? normalizeDomain(live) : null);
-      if (!domain) {
-        skipped++;
-        continue;
-      }
 
       const priceRaw = cell(r, idx.price);
       const price = parseMoney(priceRaw);
@@ -96,6 +98,32 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
       const doc = cellText(cell(r, idx.article));
       const pair = cellText(cell(r, idx.pair));
       const notes = cellText(cell(r, idx.notes));
+
+      if (!domain) {
+        // Detect payment lines at the bottom of the sheet (e.g. "30,000 Only Index links Payment", "700 Remaining")
+        const rowText = r.map((c) => String(c ?? '')).join(' ');
+        const isPaymentRow = /pay|paid|payment|remaining|advance|sent|transferred|deposit/i.test(rowText);
+        const amount = price ?? parseMoney(cell(r, idx.live)) ?? parseMoney(cell(r, idx.site));
+        if (amount && amount > 0 && isPaymentRow && src.vendor_id) {
+          const paidDate = date ?? parseDate(rowText) ?? startedAt.slice(0, 10);
+          const pNote = doc ?? cellText(cell(r, idx.status)) ?? cellText(cell(r, idx.notes)) ?? rowText.slice(0, 150);
+          const pKey = `p:${src.id}|${amount}|${paidDate}|${pNote?.slice(0, 20) ?? ''}`;
+          paymentsMap.set(pKey, {
+            source_id: src.id,
+            source_key: pKey,
+            vendor_id: src.vendor_id,
+            vendor_name: vendorName,
+            amount,
+            currency,
+            paid_date: paidDate,
+            method: 'Sheet import',
+            notes: pNote,
+          });
+        } else {
+          skipped++;
+        }
+        continue;
+      }
 
       // 1. Available vendor site listing
       if (src.vendor_id) {
@@ -118,15 +146,14 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
         }
       }
 
-      // 2. Order record (if live link, date, article/doc, status, or pair exists, or order column mapped)
-      const hasOrderData = !!(live || date || doc || st || pair);
-      const hasOrderMapping = idx.live >= 0 || idx.date >= 0 || idx.article >= 0 || idx.status >= 0;
-      if (hasOrderData || hasOrderMapping) {
+      // 2. Order record: only if this row has actual order data (live URL, order date, or article doc)
+      const isOrder = !!(live || date || doc);
+      if (isOrder) {
         const key = live
           ? `u:${live.toLowerCase()}`
           : (doc
             ? `a:${doc.toLowerCase()}`
-            : `d:${domain}|${date ?? ''}|${(vendorName ?? '').toLowerCase()}#${rowCounter}`);
+            : `d:${domain}|${date ?? ''}`);
 
         ordersMap.set(key, {
           source_id: src.id,
@@ -137,7 +164,7 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
           vendor_id: vendorId ?? src.vendor_id,
           vendor_name: vendorName,
           order_date: date,
-          price_paid: price,
+          price_paid: price, // strictly the price written in front of the site in this row!
           currency,
           notes,
           sheet_status: st === 'indexed' || st === 'not_indexed' ? st : null,
@@ -152,21 +179,11 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
   if (!usedTabs.length) {
     throw new Error(`The website or live link column was not found in header row ${src.header_row} of any tab. Open the sheet settings and map the columns again.`);
   }
-  if (sitesMap.size === 0 && ordersMap.size === 0) {
-    throw new Error('No valid website or order rows were found. Nothing was changed. Check the column mapping and header row.');
+  if (sitesMap.size === 0 && ordersMap.size === 0 && paymentsMap.size === 0) {
+    throw new Error('No valid website, order, or payment rows were found. Nothing was changed. Check the column mapping and header row.');
   }
 
-  // Price fallback for orders with empty price: use the vendor's price for that domain
-  for (const ord of ordersMap.values()) {
-    if (ord.price_paid === null) {
-      const s = sitesMap.get(ord.domain);
-      if (s && s.price !== null) {
-        ord.price_paid = s.price;
-        ord.currency = s.currency || ord.currency;
-      }
-    }
-  }
-
+  // 1. Save vendor sites
   if (sitesMap.size > 0 && src.vendor_id) {
     const records = Array.from(sitesMap.values());
     for (let i = 0; i < records.length; i += CHUNK) {
@@ -177,6 +194,7 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
     if (delErr) throw new Error(`Database error while cleaning old sites: ${delErr.message}`);
   }
 
+  // 2. Save orders & clean up stale/duplicate orders for this sheet
   if (ordersMap.size > 0) {
     const records = Array.from(ordersMap.values());
     for (let i = 0; i < records.length; i += CHUNK) {
@@ -184,12 +202,22 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
       if (error) throw new Error(`Database error while saving orders: ${error.message}`);
     }
 
+    // Clean up duplicate or removed orders that belong to this sheet source
+    const { data: existingOrders } = await db.from('orders').select('id,source_key').eq('source_id', src.id);
+    const staleIds = (existingOrders ?? []).filter((o: any) => !ordersMap.has(o.source_key)).map((o: any) => o.id);
+    if (staleIds.length > 0) {
+      for (let i = 0; i < staleIds.length; i += 100) {
+        await db.from('orders').delete().in('id', staleIds.slice(i, i + 100));
+      }
+    }
+
+    // Apply sheet index status to orders that have not yet been checked by Serper on Google
     for (const status of ['indexed', 'not_indexed'] as const) {
       const keys = records.filter((r) => r.sheet_status === status && r.live_url).map((r) => r.source_key);
       for (let i = 0; i < keys.length; i += 100) {
         const { error } = await db
           .from('orders')
-          .update({ indexed_status: status })
+          .update({ indexed_status: status, index_error: null })
           .eq('source_id', src.id)
           .in('source_key', keys.slice(i, i + 100))
           .is('last_checked_at', null);
@@ -198,12 +226,27 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
     }
   }
 
-  const label = ordersMap.size > 0 && sitesMap.size > 0
-    ? `${sitesMap.size} sites and ${ordersMap.size} orders synced`
-    : ordersMap.size > 0
-    ? `${ordersMap.size} orders synced`
-    : `${sitesMap.size} sites synced`;
-  const totalCount = sitesMap.size + ordersMap.size;
+  // 3. Save auto-detected payments from sheet bottom lines
+  if (paymentsMap.size > 0) {
+    const payRecords = Array.from(paymentsMap.values());
+    for (let i = 0; i < payRecords.length; i += CHUNK) {
+      const { error } = await db.from('payments').upsert(payRecords.slice(i, i + CHUNK), { onConflict: 'source_id,source_key' });
+      if (error) console.error('Error importing sheet payments:', error.message);
+    }
+  }
+
+  let label = 'sites synced';
+  if (ordersMap.size > 0 && sitesMap.size > 0) {
+    label = `${sitesMap.size} sites and ${ordersMap.size} orders synced`;
+  } else if (ordersMap.size > 0) {
+    label = `${ordersMap.size} orders synced`;
+  } else {
+    label = `${sitesMap.size} sites synced`;
+  }
+  if (paymentsMap.size > 0) {
+    label += `, ${paymentsMap.size} payments imported`;
+  }
+  const totalCount = sitesMap.size + ordersMap.size + paymentsMap.size;
   return { ok: true, rows: totalCount, message: summary(label, totalCount, usedTabs, skippedTabs, skipped, missing) };
 }
 
@@ -271,25 +314,6 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
   if (!usedTabs.length) throw new Error('Map at least the website column or the live link column (and check the header row), then try again.');
   if (map.size === 0) throw new Error('No valid order rows were found. Nothing was changed. Check the column mapping and header row.');
 
-  // No price in the sheet? Use the price this vendor lists for that site (only fills empty prices).
-  const need = Array.from(map.values()).filter((r) => r.price_paid === null && r.vendor_id);
-  if (need.length) {
-    const vendorIds = Array.from(new Set(need.map((r) => r.vendor_id as string)));
-    const domains = Array.from(new Set(need.map((r) => r.domain)));
-    const listed = new Map<string, { price: number; currency: string | null }>();
-    for (let i = 0; i < domains.length; i += 100) {
-      const { data } = await db.from('vendor_sites').select('vendor_id,domain,price,currency').in('vendor_id', vendorIds).in('domain', domains.slice(i, i + 100)).not('price', 'is', null);
-      for (const row of (data ?? []) as any[]) listed.set(`${row.vendor_id}|${row.domain}`, { price: Number(row.price), currency: row.currency });
-    }
-    for (const r of need) {
-      const hit = listed.get(`${r.vendor_id}|${r.domain}`);
-      if (hit) {
-        r.price_paid = hit.price;
-        r.currency = hit.currency || r.currency;
-      }
-    }
-  }
-
   // Upsert only touches the columns above, so Google-check history of existing orders is preserved.
   const records = Array.from(map.values());
   for (let i = 0; i < records.length; i += CHUNK) {
@@ -303,7 +327,7 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
     for (let i = 0; i < keys.length; i += 100) {
       const { error } = await db
         .from('orders')
-        .update({ indexed_status: status })
+        .update({ indexed_status: status, index_error: null })
         .eq('source_id', src.id)
         .in('source_key', keys.slice(i, i + 100))
         .is('last_checked_at', null);

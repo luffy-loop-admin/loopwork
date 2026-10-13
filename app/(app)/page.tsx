@@ -28,13 +28,20 @@ export default async function Dashboard() {
   const supabase = await createClient();
   const isAdmin = profile.role === 'admin';
 
-  const [sites, orders, spendRes, sourcesRes] = await Promise.all([
+  const [sites, orders, spendRes, sourcesRes, vendorsRes] = await Promise.all([
     count(supabase.from('vendor_sites').select('id', { count: 'exact', head: true })),
     count(supabase.from('orders').select('id', { count: 'exact', head: true })),
     supabase.from('vendor_balance').select('vendor_name,currency,orders_count,ordered_total,paid_total,balance').order('vendor_name'),
     supabase.from('sheet_sources').select('id,kind,label,last_synced_at,last_sync_status,last_sync_message,vendors(name)').order('created_at'),
+    supabase.from('vendors').select('id,name').eq('active', true).order('name'),
   ]);
-  const spend = (spendRes.data ?? []) as { vendor_name: string; currency: string; orders_count: number; ordered_total: number; paid_total: number; balance: number }[];
+  const spendData = (spendRes.data ?? []) as { vendor_name: string; currency: string; orders_count: number; ordered_total: number; paid_total: number; balance: number }[];
+  const spendMap = new Map<string, typeof spendData[0]>();
+  for (const s of spendData) spendMap.set(s.vendor_name.toLowerCase(), s);
+  const allVendorsList = (vendorsRes.data ?? []) as { id: string; name: string }[];
+  const spend = allVendorsList.length
+    ? allVendorsList.map((v) => spendMap.get(v.name.toLowerCase()) ?? { vendor_name: v.name, currency: 'PKR', orders_count: 0, ordered_total: 0, paid_total: 0, balance: 0 })
+    : spendData;
   const sources = (sourcesRes.data ?? []) as any[];
 
   let vendorsActive = 0, notIndexed = 0, pending = 0;

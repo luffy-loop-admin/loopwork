@@ -37,7 +37,12 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   ]);
   const rows = (data ?? []) as any[];
   const vendors = (vendorsRes.data ?? []) as { id: string; name: string }[];
-  const balances = (balRes.data ?? []) as any[];
+  const balMap = new Map<string, any>();
+  for (const b of (balRes.data ?? []) as any[]) balMap.set(b.vendor_name.toLowerCase(), b);
+  const balances = vendors.map((v) => {
+    const hit = balMap.get(v.name.toLowerCase());
+    return hit ?? { vendor_name: v.name, currency: 'PKR', orders_count: 0, payments_count: 0, ordered_total: 0, paid_total: 0, balance: 0 };
+  });
   const today = new Date().toISOString().slice(0, 10);
 
   return (

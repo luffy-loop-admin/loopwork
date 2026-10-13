@@ -9,8 +9,11 @@ export function siteQuery(liveUrl: string): string {
 
 /** Uses the Serper.dev API (never scrapes Google). Indexed = at least one organic result. */
 export async function serperIndexCheck(liveUrl: string): Promise<{ indexed: boolean; count: number }> {
-  const key = process.env.SERPER_API_KEY;
-  if (!key) throw new Error('SERPER_API_KEY is not set.');
+  const rawKey = process.env.SERPER_API_KEY;
+  const key = rawKey?.trim().replace(/^["']|["']$/g, '');
+  if (!key || key === 'your_serper_api_key') {
+    throw new Error('SERPER_API_KEY is not configured or is using placeholder. Add your API key from serper.dev in Vercel Environment Variables, then redeploy.');
+  }
   const res = await fetch('https://google.serper.dev/search', {
     method: 'POST',
     headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
@@ -19,6 +22,9 @@ export async function serperIndexCheck(liveUrl: string): Promise<{ indexed: bool
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    if (res.status === 403) {
+      throw new Error(`Serper error 403: Invalid or unauthorized API key. Make sure the SERPER_API_KEY in Vercel matches your Serper.dev key and your account has credits.`);
+    }
     throw new Error(`Serper error ${res.status}: ${text.slice(0, 160)}`);
   }
   const json = (await res.json()) as { organic?: unknown[] };
@@ -52,7 +58,8 @@ export async function checkOrders(opts: { ids?: string[]; onlyStaleHours?: numbe
 
   const summary: CheckSummary = { checked: 0, failed: 0, total: rows.length, remaining: 0, results: [] };
   if (!rows.length) return summary;
-  if (!process.env.SERPER_API_KEY) throw new Error('SERPER_API_KEY is not set. Add it in your environment variables.');
+  const checkKey = (process.env.SERPER_API_KEY ?? '').trim().replace(/^["']|["']$/g, '');
+  if (!checkKey || checkKey === 'your_serper_api_key') throw new Error('SERPER_API_KEY is not set. Add your Serper API key in Vercel Environment Variables, then redeploy.');
 
   const deadline = Date.now() + opts.budgetMs;
   let next = 0;

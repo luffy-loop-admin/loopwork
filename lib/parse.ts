@@ -82,9 +82,13 @@ export function parseIndexStatus(v: unknown): IdxStatus | null {
   if (v === null || v === undefined) return null;
   const s = String(v).toLowerCase().replace(/[_-]+/g, ' ').trim();
   if (!s) return null;
-  if (/^(pending|wait|waiting|checking|in progress|todo|to do)/.test(s)) return 'pending';
-  if (/\b(not|non|no|un)\s*indexed\b/.test(s) || /^(no|n|not|x|false|0|✗|✘|❌)$/.test(s)) return 'not_indexed';
-  if (/indexed/.test(s) || /^(yes|y|ok|done|true|1|✓|✔|✅)$/.test(s)) return 'indexed';
+  if (/^(pending|wait|waiting|checking|in progress|todo|to do|ordered|queued)/i.test(s)) return 'pending';
+  if (/\b(not|non|no|un|de)\s*index(ed|ing)?\b/i.test(s) || /^(no|n|not|x|false|0|✗|✘|❌|failed|dropped|rejected)$/i.test(s)) {
+    return 'not_indexed';
+  }
+  if (/\bindex(ed|ing)?\b/i.test(s) || /^(yes|y|ok|done|live|active|published|posted|completed|complete|true|1|✓|✔|✅)$/i.test(s)) {
+    return 'indexed';
+  }
   return null;
 }
 
