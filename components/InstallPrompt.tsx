@@ -95,10 +95,10 @@ export default function InstallPrompt({
               </div>
               <div>
                 <h3 className="text-base font-bold text-foreground">
-                  Install App on Mobile Device
+                  Install App / Create Shortcut
                 </h3>
                 <p className="text-xs sm:text-sm text-muted mt-0.5">
-                  Download to your home screen for full-screen view and instant order ring alerts.
+                  Add to your home screen as an app or shortcut for full-screen view and instant order ring alerts.
                 </p>
               </div>
             </div>
@@ -107,7 +107,7 @@ export default function InstallPrompt({
               onClick={handleInstallClick}
               className="btn btn-primary whitespace-nowrap self-start sm:self-auto px-5 py-2.5 font-semibold shadow-sm"
             >
-              📱 Download / Install App
+              📱 Install App / Create Shortcut
             </button>
           </div>
         </div>
@@ -116,10 +116,10 @@ export default function InstallPrompt({
           type="button"
           onClick={handleInstallClick}
           className={className || 'btn btn-ghost btn-sm flex items-center gap-1.5'}
-          title="Install app on mobile device"
+          title="Install app or create shortcut on home screen"
         >
           <span>📱</span>
-          <span className="hidden sm:inline">Install App</span>
+          <span className="hidden sm:inline">Install / Shortcut</span>
         </button>
       )}
 
@@ -146,7 +146,7 @@ export default function InstallPrompt({
             </div>
 
             {/* Platform Tabs */}
-            <div className="mt-4 flex rounded-lg bg-paper p-1 border border-line text-xs font-semibold">
+            <div className="mt-4 flex rounded-lg bg-paper p-1 border border-line text-xs font-semibold gap-1">
               <button
                 type="button"
                 onClick={() => setActiveTab('android')}
@@ -171,15 +171,15 @@ export default function InstallPrompt({
               <div className="mt-4 space-y-3 text-sm text-foreground">
                 <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
                   <span className="font-bold text-accent">1</span>
-                  <span>Tap the <strong>three dots menu (⋮)</strong> at the top-right of Chrome or your browser.</span>
+                  <span>Tap the <strong>three dots menu (⋮)</strong> at the top-right of your browser.</span>
                 </div>
                 <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
                   <span className="font-bold text-accent">2</span>
-                  <span>Select <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home screen&quot;</strong>.</span>
+                  <span>Select <strong>&quot;Install app&quot;</strong>, <strong>&quot;Add to Home screen&quot;</strong>, or <strong>&quot;Create shortcut&quot;</strong>.</span>
                 </div>
                 <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
                   <span className="font-bold text-accent">3</span>
-                  <span>Tap <strong>Install</strong> to add the portal to your home screen.</span>
+                  <span>Tap <strong>Install / Add</strong>. The portal icon will be added to your home screen and open in full screen!</span>
                 </div>
               </div>
             ) : (

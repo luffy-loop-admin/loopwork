@@ -1,14 +1,32 @@
 # Summary of Updates & Features
 
-## 1. 📱 Download / Install App on Mobile Devices (Dashboard & Login)
-- Added an install card directly on both the **Dashboard** and the **Login page**.
-- **Android / Chrome / Edge:** One-tap "Download / Install App" button triggers the native browser install prompt.
-- **iPhone / iPad (Safari):** Displays clear, visual step-by-step instructions (*Share -> Add to Home Screen*).
-- Once installed as a PWA, it runs in full screen just like a native mobile app.
+## 1. 📱 Install App vs Create Shortcut (Fixed & Enhanced)
+- **Why browsers only showed "Create shortcut":**
+  - Chrome requires high-resolution 192x192 and 512x512 PNG icons in `public/icons/` and in `sw.js` cache. Previously, `icon-192.png` was missing (causing a 404), which caused Chrome to disqualify the PWA and only offer "Create shortcut".
+  - **The fix:**
+    - Generated and verified `public/icons/icon-192.png`, `icon-512.png`, and `maskable-512.png`.
+    - Added `<link rel="manifest" href="/manifest.webmanifest">` to metadata.
+    - Updated `sw.js` with `SKIP_WAITING` and reliable offline asset caching.
+- **Enhanced Install Prompt Modal:**
+  - Clear tabs for **Android**, **iPhone**, and **Desktop**.
+  - Clearly explains: whether your browser menu says **"Install app"**, **"Add to Home screen"**, or **"Create shortcut"**, tapping it will add the app to your home screen and open it in full screen!
+  - Added on both the **Dashboard** and **Login page**.
 
 ---
 
-## 2. 📋 "All Listings" Section: Payment Status & Date
+## 2. 🚀 Update Announcement Popup (Admin & User)
+- Whenever an admin or user opens the portal after a new version or update is released:
+  - An interactive **"✨ What's New in This Update"** popup modal appears automatically!
+  - Highlights all new features (Mobile Shortcut, Order Ring Alert, Payment Status, etc.).
+  - Clicking **"✨ Got It / Continue to Portal"** saves their acknowledgement so it doesn't interrupt them again until the next release.
+- **Live Background Update Detection:**
+  - If a user has the portal open when a new deployment goes live on Vercel, the service worker detects it and shows a banner: `🔄 Refresh & Update Now`.
+- **"✨ Updates" Button:**
+  - Added an **"✨ Updates"** button in the top navigation bar so anyone can review the latest changes anytime.
+
+---
+
+## 3. 📋 "All Listings" Section: Payment Status & Date
 - In **All listings** (`/listings`):
   - Removed **DA**, **DR**, and **Niche** columns.
   - Added **Payment status** with colored badges:
@@ -17,12 +35,12 @@
     - 🔴 **Unpaid / Not Paid** (Red)
   - Added **Date** column displaying the date formatted cleanly.
 - Updated the sheet column matcher in `lib/fields.ts`:
-  - Recognizes `Payment Status`, `Payment`, `Paid`, `Status`, `Date`, and `Payment Date`.
+  - Automatically matches `Payment Status`, `Payment`, `Paid`, `Status`, `Date`, and `Payment Date`.
   - When you resync vendor sheets, the payment status and date are imported directly into the listings table.
 
 ---
 
-## 3. 🔔 Admin Order Alert Bell & Vendor Device Ringtone
+## 4. 🔔 Admin Order Alert Bell & Vendor Device Ringtone
 - **Admin Side:**
   - **Orders table (`/admin/orders`):** Next to each order with an assigned vendor, there is now a **🔔 Ring** button. Clicking it rings that vendor's device and plays a confirmation ding for the admin.
   - **Add order (`/admin/orders/new` & dashboard):** Added a checked-by-default option:
@@ -34,14 +52,12 @@
     - **Looping Ringtone:** Melodic order ringtone chime plays repeatedly.
     - **Voice Alert:** Speaks *"New order from Loop"* via browser speech synthesis.
     - **Vibration:** Vibrates the mobile device (on supported Android devices).
-    - **Visual Modal:** Displays a prominent, full-screen popup with:
-      - Website name
-      - Price (PKR)
-      - Date
+    - **Visual Modal:** Displays a popup with the order website, price, and date.
+    - **Buttons:**
       - **"🔇 Stop Ring / Got it"** button (silences sound and acknowledges alert)
       - **"View Orders →"** button
 - **Test Sound Button:**
-  - Added a **🔔 Test Sound** button in the top navigation bar so anyone can test their speaker and hear the ringtone at any time.
+  - Added a **🔔 Test Sound** button in the top navigation bar to test speakers and hear the ringtone anytime.
 
 ---
 
@@ -76,12 +92,3 @@ Either:
    ```
 2. Or upload the updated files from the zip archive:
    `/mnt/cptmukaram/vendor-guest-post-portal.zip`
-
----
-
-### Step 3: Resync Your Sheets
-1. Go to **Sheets** in the portal.
-2. If you added a new column in Google Sheets (e.g. `Payment Status` or `Payment Date`):
-   - Click **Edit** on that sheet -> **Load columns** -> verify `Payment status` is matched -> **Save & sync**.
-3. Go to **All listings** to see your updated sites with Payment Status and Date!
-4. Go to **Orders & indexing** to test the 🔔 **Ring** button!

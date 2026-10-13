@@ -6,6 +6,7 @@ import NavLinks from '@/components/NavLinks';
 import InstallPrompt from '@/components/InstallPrompt';
 import OrderAlertClient from '@/components/OrderAlertClient';
 import SoundTestButton from '@/components/SoundTestButton';
+import WhatsNewButton from '@/components/WhatsNewButton';
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const profile = await requireProfile();
@@ -40,6 +41,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <span className="hidden max-w-[16rem] truncate text-sm text-muted sm:inline">
               {profile.role === 'admin' ? 'Admin' : profile.vendor_name} · {profile.email}
             </span>
+            <WhatsNewButton />
             <SoundTestButton />
             <InstallPrompt />
             <form action={logout}>
