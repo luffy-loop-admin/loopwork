@@ -67,6 +67,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                       <th className="th">DR</th>
                       <th className="th">Traffic</th>
                       <th className="th">Niche</th>
+                      {isAdmin && <th className="th">Order</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -81,6 +82,16 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                         <td className="td">{o.dr ?? '-'}</td>
                         <td className="td">{num(o.traffic)}</td>
                         <td className="td">{o.niche ?? '-'}</td>
+                        {isAdmin && (
+                          <td className="td">
+                            <Link
+                              className="btn btn-primary btn-sm no-underline"
+                              href={`/admin/orders/new?${new URLSearchParams({ domain: o.domain, vendor: o.vendor_id, ...(o.price !== null ? { price: String(o.price) } : {}), currency: o.currency ?? 'PKR' }).toString()}`}
+                            >
+                              Assign order
+                            </Link>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

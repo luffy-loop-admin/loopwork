@@ -33,5 +33,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/cron/).*)'],
+  // Also skip the files a phone needs BEFORE login to install the app (manifest, service worker, icons, offline page).
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|favicon.png|manifest.webmanifest|sw.js|offline.html|icons/|api/cron/).*)'],
 };

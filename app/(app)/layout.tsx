@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { requireProfile } from '@/lib/auth';
 import { logout } from '@/app/actions/auth';
 import NavLinks from '@/components/NavLinks';
+import InstallPrompt from '@/components/InstallPrompt';
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const profile = await requireProfile();
@@ -13,6 +14,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           { href: '/search', label: 'Search' },
           { href: '/search/bulk', label: 'Bulk search' },
           { href: '/admin/orders', label: 'Orders & indexing' },
+          { href: '/admin/payments', label: 'Payments' },
           { href: '/admin/vendors', label: 'Vendors' },
           { href: '/admin/sheets', label: 'Sheets' },
           { href: '/listings', label: 'All listings' },
@@ -22,6 +24,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           { href: '/search', label: 'Search' },
           { href: '/search/bulk', label: 'Bulk search' },
           { href: '/listings', label: 'My listings' },
+          { href: '/orders', label: 'Orders' },
+          { href: '/payments', label: 'Payments' },
         ];
 
   return (
@@ -33,6 +37,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <span className="hidden max-w-[16rem] truncate text-sm text-muted sm:inline">
               {profile.role === 'admin' ? 'Admin' : profile.vendor_name} · {profile.email}
             </span>
+            <InstallPrompt />
             <form action={logout}>
               <button type="submit" className="btn btn-ghost btn-sm">Sign out</button>
             </form>

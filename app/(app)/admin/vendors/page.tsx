@@ -11,13 +11,13 @@ export default async function VendorsPage() {
     supabase.from('vendors').select('id,name,notes,active,created_at').order('name'),
     supabase.from('profiles').select('email,vendor_id').eq('role', 'vendor'),
     supabase.from('sheet_sources').select('vendor_id,last_synced_at,last_sync_status').eq('kind', 'vendor'),
-    supabase.from('vendor_spend').select('vendor_id,currency,orders_count,total_spent'),
+    supabase.from('vendor_balance').select('vendor_id,currency,orders_count,ordered_total,paid_total,balance'),
     supabase.from('vendor_site_counts').select('vendor_id,sites_count'),
   ]);
   const vendors = (vendorsRes.data ?? []) as { id: string; name: string; notes: string | null; active: boolean }[];
   const profiles = (profilesRes.data ?? []) as { email: string; vendor_id: string }[];
   const sources = (sourcesRes.data ?? []) as { vendor_id: string; last_synced_at: string | null; last_sync_status: string | null }[];
-  const spend = (spendRes.data ?? []) as { vendor_id: string; currency: string; orders_count: number; total_spent: number }[];
+  const spend = (spendRes.data ?? []) as { vendor_id: string; currency: string; orders_count: number; ordered_total: number; paid_total: number; balance: number }[];
   const counts = (countsRes.data ?? []) as { vendor_id: string; sites_count: number }[];
 
   return (
@@ -51,7 +51,7 @@ export default async function VendorsPage() {
       </details>
 
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[820px] border-collapse">
+        <table className="w-full min-w-[900px] border-collapse">
           <thead>
             <tr>
               <th className="th">Vendor</th>
@@ -59,6 +59,7 @@ export default async function VendorsPage() {
               <th className="th">Sites</th>
               <th className="th">Last sync</th>
               <th className="th">Total spent</th>
+              <th className="th">Balance due</th>
               <th className="th">Manage</th>
             </tr>
           </thead>
@@ -89,7 +90,10 @@ export default async function VendorsPage() {
                     )}
                   </td>
                   <td className="td">
-                    {sp.length === 0 ? '-' : sp.map((s) => <div key={s.currency}>{money(s.total_spent, s.currency)} <span className="text-xs text-muted">({s.orders_count})</span></div>)}
+                    {sp.length === 0 ? '-' : sp.map((s) => <div key={s.currency}>{money(s.ordered_total, s.currency)} <span className="text-xs text-muted">({s.orders_count})</span></div>)}
+                  </td>
+                  <td className="td">
+                    {sp.length === 0 ? '-' : sp.map((s) => <div key={s.currency} className={Number(s.balance) > 0 ? 'text-warn' : 'text-good'}>{money(s.balance, s.currency)}</div>)}
                   </td>
                   <td className="td">
                     <details>
@@ -122,7 +126,7 @@ export default async function VendorsPage() {
                 </tr>
               );
             })}
-            {vendors.length === 0 && <tr><td className="td text-muted" colSpan={6}>No vendors yet. Add your first one above.</td></tr>}
+            {vendors.length === 0 && <tr><td className="td text-muted" colSpan={7}>No vendors yet. Add your first one above.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -40,7 +40,7 @@ export type CheckSummary = {
  */
 export async function checkOrders(opts: { ids?: string[]; onlyStaleHours?: number; budgetMs: number; concurrency?: number }): Promise<CheckSummary> {
   const db = createAdminClient();
-  let q = db.from('orders').select('id,live_url').not('live_url', 'is', null);
+  let q = db.from('orders').select('id,live_url').not('live_url', 'is', null).neq('order_status', 'cancelled');
   if (opts.ids && opts.ids.length) q = q.in('id', opts.ids);
   if (opts.onlyStaleHours) {
     const cutoff = new Date(Date.now() - opts.onlyStaleHours * 3600 * 1000).toISOString();

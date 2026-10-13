@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getAdmin } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { CURRENCY } from '@/lib/config';
 import { cleanUrl, normalizeDomain } from '@/lib/domain';
 import { str } from '@/lib/form';
 import { checkOrders } from '@/lib/indexing';
@@ -10,13 +11,14 @@ import { parseDate, parseMoney } from '@/lib/parse';
 import type { ActionResult } from '@/lib/types';
 
 const DENIED: ActionResult = { ok: false, message: 'Not allowed.' };
+const ORDER_STATUSES = ['ordered', 'live', 'cancelled'];
+const INDEX_STATUSES = ['pending', 'indexed', 'not_indexed'];
 
 function refresh() {
-  revalidatePath('/');
-  revalidatePath('/admin/orders');
-  revalidatePath('/admin/vendors');
+  for (const p of ['/', '/admin/orders', '/admin/vendors', '/admin/payments', '/orders']) revalidatePath(p);
 }
 
+/** Creates or edits an order. Choosing a vendor ASSIGNS the order to them (they see it under "Orders"). */
 export async function saveOrder(formData: FormData): Promise<ActionResult> {
   if (!(await getAdmin())) return DENIED;
   const id = str(formData, 'id');
@@ -34,6 +36,10 @@ export async function saveOrder(formData: FormData): Promise<ActionResult> {
     vendorName = (data as { name: string } | null)?.name ?? vendorName;
   }
 
+  let orderStatus = str(formData, 'order_status');
+  if (!ORDER_STATUSES.includes(orderStatus)) orderStatus = live ? 'live' : 'ordered';
+  if (live && orderStatus === 'ordered') orderStatus = 'live'; // a live link means the order is delivered
+
   const row: Record<string, unknown> = {
     domain,
     live_url: live,
@@ -41,25 +47,33 @@ export async function saveOrder(formData: FormData): Promise<ActionResult> {
     vendor_name: vendorName,
     order_date: parseDate(str(formData, 'order_date')),
     price_paid: parseMoney(str(formData, 'price_paid')),
-    currency: (str(formData, 'currency') || 'USD').toUpperCase().slice(0, 3),
+    currency: (str(formData, 'currency') || CURRENCY).toUpperCase().slice(0, 3),
     notes: str(formData, 'notes') || null,
+    order_status: orderStatus,
     updated_at: new Date().toISOString(),
   };
 
+  const indexIn = str(formData, 'indexed_status');
   if (id) {
     const { data: before } = await db.from('orders').select('live_url').eq('id', id).maybeSingle();
     if ((before as { live_url: string | null } | null)?.live_url !== live) {
       Object.assign(row, { indexed_status: 'pending', last_checked_at: null, index_result_count: null, index_error: null });
+    } else if (INDEX_STATUSES.includes(indexIn)) {
+      row.indexed_status = indexIn;
     }
     const { error } = await db.from('orders').update(row).eq('id', id);
     if (error) return { ok: false, message: error.message };
     refresh();
     redirect('/admin/orders');
   }
+
+  if (INDEX_STATUSES.includes(indexIn)) row.indexed_status = indexIn;
   const { error } = await db.from('orders').insert(row);
   if (error) return { ok: false, message: error.message };
   refresh();
-  return { ok: true, message: 'Order added.' };
+  const after = str(formData, 'after');
+  if (after.startsWith('/admin/')) redirect(after);
+  return { ok: true, message: vendorName ? `Order added and assigned to ${vendorName}.` : 'Order added.' };
 }
 
 export async function deleteOrder(id: string): Promise<ActionResult> {

@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import ActionForm from './ActionForm';
-import { fieldsFor } from '@/lib/fields';
+import { fieldsFor, type SheetKind } from '@/lib/fields';
 import type { ActionResult } from '@/lib/types';
 
 type Initial = {
@@ -17,7 +17,7 @@ type Initial = {
 };
 
 type Props = {
-  kind: 'vendor' | 'orders';
+  kind: SheetKind;
   vendors: { id: string; name: string }[];
   serviceEmail: string;
   action: (formData: FormData) => Promise<ActionResult | void>;
@@ -92,8 +92,9 @@ export default function SheetForm({ kind, vendors, serviceEmail, action, initial
 
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <label className="label" htmlFor="tab_name">Tab name</label>
+            <label className="label" htmlFor="tab_name">Tabs to read</label>
             <input id="tab_name" name="tab_name" className="input" placeholder="First tab" value={tab} onChange={(e) => setTab(e.target.value)} />
+            <p className="mt-1 text-xs text-muted">Empty = first tab. <strong>*</strong> = every tab (e.g. one tab per month). Or list names: Jan 2026, Feb 2026</p>
           </div>
           <div>
             <label className="label" htmlFor="header_row">Header row number</label>
@@ -101,14 +102,14 @@ export default function SheetForm({ kind, vendors, serviceEmail, action, initial
           </div>
           <div>
             <label className="label" htmlFor="default_currency">Default currency</label>
-            <input id="default_currency" name="default_currency" maxLength={3} className="input" defaultValue={initial.default_currency ?? 'USD'} />
+            <input id="default_currency" name="default_currency" maxLength={3} className="input" defaultValue={initial.default_currency ?? 'PKR'} />
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="label" htmlFor="label">Label (optional)</label>
-            <input id="label" name="label" className="input" defaultValue={initial.label ?? ''} placeholder={kind === 'orders' ? 'My order history' : 'Main price list'} />
+            <input id="label" name="label" className="input" defaultValue={initial.label ?? ''} placeholder={kind === 'orders' ? 'My order history' : kind === 'payments' ? 'Payments' : 'Main price list'} />
           </div>
           <label className="flex items-center gap-2 self-end pb-2 text-sm">
             <input type="checkbox" name="active" defaultChecked={initial.active ?? true} className="h-4 w-4" />

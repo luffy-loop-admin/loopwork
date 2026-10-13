@@ -3,7 +3,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getAdmin } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { fieldsFor } from '@/lib/fields';
+import { CURRENCY } from '@/lib/config';
+import { fieldsFor, type SheetKind } from '@/lib/fields';
 import { bool, str } from '@/lib/form';
 import { parseSpreadsheetId } from '@/lib/sheets';
 import { syncAllSources, syncSource } from '@/lib/sync';
@@ -12,17 +13,14 @@ import type { ActionResult } from '@/lib/types';
 const DENIED: ActionResult = { ok: false, message: 'Not allowed.' };
 
 function refresh() {
-  revalidatePath('/');
-  revalidatePath('/admin/sheets');
-  revalidatePath('/admin/vendors');
-  revalidatePath('/admin/orders');
-  revalidatePath('/listings');
+  for (const p of ['/', '/admin/sheets', '/admin/vendors', '/admin/orders', '/admin/payments', '/listings']) revalidatePath(p);
 }
 
 export async function saveSource(formData: FormData): Promise<ActionResult> {
   if (!(await getAdmin())) return DENIED;
   const id = str(formData, 'id');
-  const kind = str(formData, 'kind') === 'orders' ? 'orders' : 'vendor';
+  const raw = str(formData, 'kind');
+  const kind: SheetKind = raw === 'orders' ? 'orders' : raw === 'payments' ? 'payments' : 'vendor';
   const vendorId = str(formData, 'vendor_id');
   const sheetUrl = str(formData, 'sheet_url');
   const spreadsheetId = parseSpreadsheetId(sheetUrl);
@@ -47,7 +45,7 @@ export async function saveSource(formData: FormData): Promise<ActionResult> {
     spreadsheet_id: spreadsheetId,
     tab_name: str(formData, 'tab_name') || null,
     header_row: headerRow,
-    default_currency: (str(formData, 'default_currency') || 'USD').toUpperCase().slice(0, 3),
+    default_currency: (str(formData, 'default_currency') || CURRENCY).toUpperCase().slice(0, 3),
     mapping,
     active: bool(formData, 'active'),
   };

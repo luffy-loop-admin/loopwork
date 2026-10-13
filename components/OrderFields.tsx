@@ -1,34 +1,33 @@
 type Vendor = { id: string; name: string };
 type Order = {
-  id: string; domain: string; live_url: string | null; vendor_id: string | null; vendor_name: string | null;
-  order_date: string | null; price_paid: number | null; currency: string | null; notes: string | null;
+  id?: string; domain?: string; live_url?: string | null; vendor_id?: string | null; vendor_name?: string | null;
+  order_date?: string | null; price_paid?: number | null; currency?: string | null; notes?: string | null;
+  order_status?: string | null; indexed_status?: string | null;
 };
 
-/** Inputs shared by "Add order" and "Edit order". Rendered inside an <ActionForm>. */
-export default function OrderFields({ vendors, order }: { vendors: Vendor[]; order?: Order }) {
+/** Inputs shared by "Add / assign order" and "Edit order". Rendered inside an <ActionForm>. Pass a partial `order` to pre-fill. */
+export default function OrderFields({ vendors, order, after }: { vendors: Vendor[]; order?: Order; after?: string }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {order && <input type="hidden" name="id" value={order.id} />}
-      <div className="sm:col-span-2">
-        <label className="label" htmlFor="live_url">Live link URL</label>
-        <input id="live_url" name="live_url" className="input" defaultValue={order?.live_url ?? ''} placeholder="https://example.com/my-guest-post" />
-      </div>
+      {order?.id && <input type="hidden" name="id" value={order.id} />}
+      {after && <input type="hidden" name="after" value={after} />}
       <div>
-        <label className="label" htmlFor="domain">Website <span className="font-normal text-muted">(only if there is no live link yet)</span></label>
-        <input id="domain" name="domain" className="input" defaultValue={order?.live_url ? '' : order?.domain ?? ''} placeholder="example.com" />
-      </div>
-      <div>
-        <label className="label" htmlFor="vendor_id">Vendor</label>
+        <label className="label" htmlFor="vendor_id">Assign to vendor</label>
         <select id="vendor_id" name="vendor_id" className="input" defaultValue={order?.vendor_id ?? ''}>
           <option value="">Not in the list</option>
           {vendors.map((v) => (
             <option key={v.id} value={v.id}>{v.name}</option>
           ))}
         </select>
+        <p className="mt-1 text-xs text-muted">The vendor will see this order in their account.</p>
       </div>
       <div>
         <label className="label" htmlFor="vendor_name">Vendor name <span className="font-normal text-muted">(if not in the list)</span></label>
         <input id="vendor_name" name="vendor_name" className="input" defaultValue={order?.vendor_id ? '' : order?.vendor_name ?? ''} />
+      </div>
+      <div>
+        <label className="label" htmlFor="domain">Website</label>
+        <input id="domain" name="domain" className="input" defaultValue={order?.domain ?? ''} placeholder="example.com" autoCapitalize="none" />
       </div>
       <div>
         <label className="label" htmlFor="order_date">Order date</label>
@@ -36,13 +35,33 @@ export default function OrderFields({ vendors, order }: { vendors: Vendor[]; ord
       </div>
       <div className="grid grid-cols-[1fr_6rem] gap-3">
         <div>
-          <label className="label" htmlFor="price_paid">Price paid</label>
+          <label className="label" htmlFor="price_paid">Price (PKR)</label>
           <input id="price_paid" name="price_paid" inputMode="decimal" className="input" defaultValue={order?.price_paid ?? ''} />
         </div>
         <div>
           <label className="label" htmlFor="currency">Currency</label>
-          <input id="currency" name="currency" maxLength={3} className="input" defaultValue={order?.currency ?? 'USD'} />
+          <input id="currency" name="currency" maxLength={3} className="input" defaultValue={order?.currency ?? 'PKR'} />
         </div>
+      </div>
+      <div>
+        <label className="label" htmlFor="order_status">Order status</label>
+        <select id="order_status" name="order_status" className="input" defaultValue={order?.order_status ?? 'ordered'}>
+          <option value="ordered">Ordered (waiting for link)</option>
+          <option value="live">Live (link delivered)</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+      <div className="sm:col-span-2">
+        <label className="label" htmlFor="live_url">Live link URL <span className="font-normal text-muted">(when delivered)</span></label>
+        <input id="live_url" name="live_url" className="input" defaultValue={order?.live_url ?? ''} placeholder="https://example.com/my-guest-post" autoCapitalize="none" />
+      </div>
+      <div>
+        <label className="label" htmlFor="indexed_status">Index status</label>
+        <select id="indexed_status" name="indexed_status" className="input" defaultValue={order?.indexed_status ?? 'pending'}>
+          <option value="pending">Pending</option>
+          <option value="indexed">Indexed</option>
+          <option value="not_indexed">Not indexed</option>
+        </select>
       </div>
       <div>
         <label className="label" htmlFor="notes">Notes</label>

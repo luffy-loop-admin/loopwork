@@ -31,10 +31,10 @@ export default async function Dashboard() {
   const [sites, orders, spendRes, sourcesRes] = await Promise.all([
     count(supabase.from('vendor_sites').select('id', { count: 'exact', head: true })),
     count(supabase.from('orders').select('id', { count: 'exact', head: true })),
-    supabase.from('vendor_spend').select('vendor_name,currency,orders_count,total_spent').order('vendor_name'),
+    supabase.from('vendor_balance').select('vendor_name,currency,orders_count,ordered_total,paid_total,balance').order('vendor_name'),
     supabase.from('sheet_sources').select('id,kind,label,last_synced_at,last_sync_status,last_sync_message,vendors(name)').order('created_at'),
   ]);
-  const spend = (spendRes.data ?? []) as { vendor_name: string; currency: string; orders_count: number; total_spent: number }[];
+  const spend = (spendRes.data ?? []) as { vendor_name: string; currency: string; orders_count: number; ordered_total: number; paid_total: number; balance: number }[];
   const sources = (sourcesRes.data ?? []) as any[];
 
   let vendorsActive = 0, notIndexed = 0, pending = 0;
@@ -75,15 +75,17 @@ export default async function Dashboard() {
 
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-semibold">{isAdmin ? 'Total spent per vendor' : 'Total paid to you'}</h2>
+          <h2 className="font-semibold">{isAdmin ? 'Spent, paid and balance per vendor' : 'Your account with us'}</h2>
         </div>
         <div className="card overflow-x-auto">
-          <table className="w-full min-w-[420px] border-collapse">
+          <table className="w-full min-w-[560px] border-collapse">
             <thead>
               <tr>
                 <th className="th">Vendor</th>
                 <th className="th">Orders</th>
-                <th className="th">Total</th>
+                <th className="th">Ordered</th>
+                <th className="th">Paid</th>
+                <th className="th">Balance due</th>
               </tr>
             </thead>
             <tbody>
@@ -91,11 +93,13 @@ export default async function Dashboard() {
                 <tr key={`${s.vendor_name}-${s.currency}-${i}`}>
                   <td className="td font-medium">{s.vendor_name}</td>
                   <td className="td">{s.orders_count}</td>
-                  <td className="td">{money(s.total_spent, s.currency)}</td>
+                  <td className="td">{money(s.ordered_total, s.currency)}</td>
+                  <td className="td">{money(s.paid_total, s.currency)}</td>
+                  <td className={`td font-semibold ${Number(s.balance) > 0 ? 'text-warn' : 'text-good'}`}>{money(s.balance, s.currency)}</td>
                 </tr>
               ))}
               {spend.length === 0 && (
-                <tr><td className="td text-muted" colSpan={3}>No orders yet.</td></tr>
+                <tr><td className="td text-muted" colSpan={5}>No orders yet.</td></tr>
               )}
             </tbody>
           </table>
@@ -121,7 +125,7 @@ export default async function Dashboard() {
                 const vendor = Array.isArray(s.vendors) ? s.vendors[0] : s.vendors;
                 return (
                   <tr key={s.id}>
-                    <td className="td font-medium">{s.kind === 'orders' ? s.label || 'Order history' : vendor?.name ?? s.label ?? 'Sheet'}</td>
+                    <td className="td font-medium">{s.kind === 'orders' ? s.label || 'Order history' : s.kind === 'payments' ? s.label || 'Payments' : vendor?.name ?? s.label ?? 'Sheet'}</td>
                     <td className="td">{fmtDateTime(s.last_synced_at)}</td>
                     <td className="td">
                       {s.last_sync_status === 'error' ? <span className="text-bad">{s.last_sync_message}</span> : <span className="text-muted">{s.last_sync_message ?? 'Not synced yet'}</span>}

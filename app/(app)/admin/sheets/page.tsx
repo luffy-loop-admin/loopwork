@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { fmtDateTime } from '@/lib/format';
+import { KIND_LABEL, type SheetKind } from '@/lib/fields';
 import { serviceAccountEmail } from '@/lib/sheets';
 import ActionButton from '@/components/ActionButton';
 import { deleteSource, syncAllAction, syncSourceAction } from '@/app/actions/sheets';
@@ -24,6 +25,7 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
         <div className="flex flex-wrap gap-2">
           <Link href="/admin/sheets/new?kind=vendor" className="btn btn-ghost no-underline">Add vendor sheet</Link>
           <Link href="/admin/sheets/new?kind=orders" className="btn btn-ghost no-underline">Add order history sheet</Link>
+          <Link href="/admin/sheets/new?kind=payments" className="btn btn-ghost no-underline">Add payments sheet</Link>
           <ActionButton action={syncAllAction} label="Sync all now" className="btn btn-primary" />
         </div>
       </div>
@@ -55,11 +57,11 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
               return (
                 <tr key={s.id} className={s.active ? '' : 'bg-paper text-muted'}>
                   <td className="td">
-                    <div className="font-medium">{s.kind === 'vendor' ? vendor?.name ?? 'Vendor' : s.label || 'Order history'}</div>
+                    <div className="font-medium">{s.kind === 'vendor' ? vendor?.name ?? 'Vendor' : s.label || KIND_LABEL[s.kind as SheetKind]}</div>
                     <a href={s.sheet_url} target="_blank" rel="noopener noreferrer" className="link text-xs">Open sheet{s.tab_name ? ` (${s.tab_name})` : ''}</a>
                     {!s.active && <div className="text-xs">Paused</div>}
                   </td>
-                  <td className="td">{s.kind === 'vendor' ? 'Vendor prices' : 'Order history'}</td>
+                  <td className="td">{KIND_LABEL[s.kind as SheetKind]}</td>
                   <td className="td">{fmtDateTime(s.last_synced_at)}</td>
                   <td className="td max-w-xs">
                     {s.last_sync_status === 'error' ? <span className="text-bad">{s.last_sync_message}</span> : <span className="text-muted">{s.last_sync_message ?? 'Not synced yet'}</span>}
@@ -72,7 +74,7 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
                         action={deleteSource.bind(null, s.id)}
                         label="Remove"
                         className="btn btn-danger btn-sm"
-                        confirm={s.kind === 'vendor' ? 'Remove this sheet and all the sites imported from it?' : 'Remove this sheet link? Orders already imported are kept.'}
+                        confirm={s.kind === 'vendor' ? 'Remove this sheet and all the sites imported from it?' : s.kind === 'payments' ? 'Remove this sheet link and the payments imported from it?' : 'Remove this sheet link? Orders already imported are kept.'}
                       />
                     </div>
                   </td>
