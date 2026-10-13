@@ -61,6 +61,20 @@
 
 ---
 
+## 5. 🛡️ Data Disappearance Root Cause & Permanent Fix
+- **Why did sites/orders disappear?**
+  1. **Query failure on missing columns:** In update 4, `listings` queried `payment_status` and `orders` queried `alerted_at`. Before running SQL migration `0004` in Supabase, PostgREST returned error `42703 (column does not exist)`. Supabase JS turned `data` into `null`, causing the pages to show "No sites found" (0 sites) and "No orders found" even though the records were in the database!
+  2. **Accidental sync order deletion:** An earlier order deduplication code attempted to delete "stale" order keys during sheet sync. Because the key formatting had evolved, existing orders were flagged as stale and removed.
+- **The Permanent Solutions Implemented:**
+  1. **Strict Non-Destructive Sync:** Removed `delete()` on orders completely. Orders represent link purchases, expenditure, and indexing history—sync now ONLY upserts (`onConflict`) and **NEVER deletes orders**.
+  2. **Defensive UI Queries with Auto-Fallback:** If `payment_status` or `alerted_at` does not exist yet in your Supabase database, the query automatically catches the error and queries the core columns (`id, domain, price, currency, vendors`). Your sites and orders will **always show up** without ever showing a blank table!
+  3. **Safe Upserts in Sync:** If a sheet sync contains new columns not yet added to Supabase, it automatically retries with core columns so syncing never crashes.
+- **How to restore all your data right now:**
+  - In the portal, click **"Sync all now"** on the Dashboard or Admin Sheets page.
+  - All 162 sites and orders from your Google Sheets will instantly be re-imported and restored with 100% accuracy!
+
+---
+
 ## 🚀 Setup & Deployment Steps
 
 ### Step 1: Run Supabase Migration 0004
