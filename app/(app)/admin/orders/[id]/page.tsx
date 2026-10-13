@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import ActionForm from '@/components/ActionForm';
 import ActionButton from '@/components/ActionButton';
+import AlertBellButton from '@/components/AlertBellButton';
 import OrderFields from '@/components/OrderFields';
 import { deleteOrder, saveOrder } from '@/app/actions/orders';
 
@@ -10,7 +11,7 @@ export default async function EditOrderPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const supabase = await createClient();
   const [{ data: order }, { data: vendors }] = await Promise.all([
-    supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url').eq('id', id).maybeSingle(),
+    supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url,alerted_at').eq('id', id).maybeSingle(),
     supabase.from('vendors').select('id,name').order('name'),
   ]);
   if (!order) notFound();
@@ -19,7 +20,10 @@ export default async function EditOrderPage({ params }: { params: Promise<{ id: 
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Edit order</h1>
-        <Link href="/admin/orders" className="link text-sm">Back to orders</Link>
+        <div className="flex items-center gap-3">
+          {order.vendor_id && <AlertBellButton orderId={order.id} vendorName={order.vendor_name} alertedAt={(order as any).alerted_at} />}
+          <Link href="/admin/orders" className="link text-sm">Back to orders</Link>
+        </div>
       </div>
       <div className="card p-4 sm:p-5">
         <ActionForm

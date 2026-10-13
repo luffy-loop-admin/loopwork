@@ -3,66 +3,214 @@ import { useEffect, useState } from 'react';
 
 type BIPEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
 
-/**
- * "Install app" button.
- * Android / desktop Chrome & Edge: one-tap install.  iPhone / iPad: shows the Share -> Add to Home Screen steps.
- * Hidden once the app is already installed.
- */
-export default function InstallPrompt({ className = 'btn btn-ghost btn-sm' }: { className?: string }) {
+export default function InstallPrompt({
+  variant = 'button',
+  className,
+}: {
+  variant?: 'button' | 'card';
+  className?: string;
+}) {
   const [evt, setEvt] = useState<BIPEvent | null>(null);
-  const [installed, setInstalled] = useState(true); // hidden until we know
-  const [ios, setIos] = useState(false);
-  const [help, setHelp] = useState(false);
+  const [installed, setInstalled] = useState(false);
+  const [isIos, setIsIos] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'android' | 'ios'>('android');
 
   useEffect(() => {
-    const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+    if (typeof window === 'undefined') return;
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (navigator as any).standalone === true;
     setInstalled(standalone);
-    setIos(/iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.userAgent.includes('Mac') && navigator.maxTouchPoints > 1));
+
+    const ua = navigator.userAgent || '';
+    const isApple = /iphone|ipad|ipod/i.test(ua) || (ua.includes('Mac') && navigator.maxTouchPoints > 1);
+    const mobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua) || navigator.maxTouchPoints > 1;
+
+    setIsIos(isApple);
+    setIsMobile(mobileDevice);
+    if (isApple) setActiveTab('ios');
+
     const onPrompt = (e: Event) => {
       e.preventDefault();
       setEvt(e as BIPEvent);
     };
-    const onInstalled = () => {
+
+    const onAppInstalled = () => {
       setInstalled(true);
       setEvt(null);
+      setShowModal(false);
     };
+
     window.addEventListener('beforeinstallprompt', onPrompt);
-    window.addEventListener('appinstalled', onInstalled);
+    window.addEventListener('appinstalled', onAppInstalled);
+
     return () => {
       window.removeEventListener('beforeinstallprompt', onPrompt);
-      window.removeEventListener('appinstalled', onInstalled);
+      window.removeEventListener('appinstalled', onAppInstalled);
     };
   }, []);
 
-  if (installed) return null;
-  if (!evt && !ios) return null;
+  const handleInstallClick = async () => {
+    if (evt) {
+      try {
+        await evt.prompt();
+        await evt.userChoice;
+        setEvt(null);
+      } catch {
+        setShowModal(true);
+      }
+    } else {
+      setShowModal(true);
+    }
+  };
+
+  if (installed) {
+    if (variant === 'card') {
+      return (
+        <div className="rounded-xl border border-good/30 bg-good-soft p-4 text-center sm:text-left flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">📱</span>
+            <div>
+              <p className="text-sm font-semibold text-good">App Installed on This Device</p>
+              <p className="text-xs text-muted">You are running the standalone app with order sound notifications enabled.</p>
+            </div>
+          </div>
+          <span className="badge bg-good text-white font-medium">Active</span>
+        </div>
+      );
+    }
+    return null;
+  }
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        className={className}
-        onClick={async () => {
-          if (evt) {
-            await evt.prompt();
-            await evt.userChoice;
-            setEvt(null);
-          } else setHelp((h) => !h);
-        }}
-      >
-        Install app
-      </button>
-      {help && (
-        <div role="dialog" aria-label="Install on iPhone" className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-line bg-white p-3 text-left text-sm shadow-lg">
-          <p className="font-medium">Install on iPhone / iPad</p>
-          <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted">
-            <li>Open this page in <strong>Safari</strong>.</li>
-            <li>Tap the <strong>Share</strong> button (square with an arrow).</li>
-            <li>Tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
-          </ol>
-          <button type="button" className="btn btn-ghost btn-sm mt-3" onClick={() => setHelp(false)}>Close</button>
+    <>
+      {variant === 'card' ? (
+        <div className="rounded-2xl border border-accent/20 bg-gradient-to-r from-accent-soft/60 to-accent-soft/20 p-4 sm:p-5 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent text-white text-2xl shadow-sm">
+                📲
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-foreground">
+                  Install App on Mobile Device
+                </h3>
+                <p className="text-xs sm:text-sm text-muted mt-0.5">
+                  Download to your home screen for full-screen view and instant order ring alerts.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleInstallClick}
+              className="btn btn-primary whitespace-nowrap self-start sm:self-auto px-5 py-2.5 font-semibold shadow-sm"
+            >
+              📱 Download / Install App
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleInstallClick}
+          className={className || 'btn btn-ghost btn-sm flex items-center gap-1.5'}
+          title="Install app on mobile device"
+        >
+          <span>📱</span>
+          <span className="hidden sm:inline">Install App</span>
+        </button>
+      )}
+
+      {/* Step-by-step instructions modal */}
+      {showModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-150"
+        >
+          <div className="relative w-full max-w-md rounded-2xl border border-line bg-white p-6 shadow-2xl text-left">
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📲</span>
+                <h3 className="font-bold text-lg text-foreground">Install on Your Device</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="btn btn-ghost btn-sm text-muted hover:text-ink text-lg leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Platform Tabs */}
+            <div className="mt-4 flex rounded-lg bg-paper p-1 border border-line text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setActiveTab('android')}
+                className={`flex-1 rounded-md py-1.5 text-center transition ${
+                  activeTab === 'android' ? 'bg-white text-accent shadow-sm' : 'text-muted'
+                }`}
+              >
+                🤖 Android / Chrome
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('ios')}
+                className={`flex-1 rounded-md py-1.5 text-center transition ${
+                  activeTab === 'ios' ? 'bg-white text-accent shadow-sm' : 'text-muted'
+                }`}
+              >
+                🍎 iPhone / iPad
+              </button>
+            </div>
+
+            {activeTab === 'android' ? (
+              <div className="mt-4 space-y-3 text-sm text-foreground">
+                <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
+                  <span className="font-bold text-accent">1</span>
+                  <span>Tap the <strong>three dots menu (⋮)</strong> at the top-right of Chrome or your browser.</span>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
+                  <span className="font-bold text-accent">2</span>
+                  <span>Select <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home screen&quot;</strong>.</span>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
+                  <span className="font-bold text-accent">3</span>
+                  <span>Tap <strong>Install</strong> to add the portal to your home screen.</span>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3 text-sm text-foreground">
+                <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
+                  <span className="font-bold text-accent">1</span>
+                  <span>Open this page in <strong>Safari</strong> on your iPhone or iPad.</span>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
+                  <span className="font-bold text-accent">2</span>
+                  <span>Tap the <strong>Share button</strong> (square icon with an arrow pointing up ⎋ at bottom).</span>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg bg-accent-soft/30 p-3">
+                  <span className="font-bold text-accent">3</span>
+                  <span>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong>, then tap <strong>Add</strong> at top-right.</span>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="btn btn-primary w-full py-2.5 font-semibold"
+              >
+                Got It
+              </button>
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

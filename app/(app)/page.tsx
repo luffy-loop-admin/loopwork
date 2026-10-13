@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { fmtDateTime, money, num } from '@/lib/format';
 import SearchBox from '@/components/SearchBox';
 import ActionButton from '@/components/ActionButton';
+import InstallPrompt from '@/components/InstallPrompt';
 import { syncAllAction } from '@/app/actions/sheets';
 
 export const maxDuration = 300;
@@ -61,6 +62,10 @@ export default async function Dashboard() {
         <p className="mt-2 text-sm text-muted">
           Or <Link className="link" href="/search/bulk">search many sites at once</Link>.
         </p>
+      </section>
+
+      <section>
+        <InstallPrompt variant="card" />
       </section>
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">

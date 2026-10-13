@@ -4,6 +4,8 @@ import { requireProfile } from '@/lib/auth';
 import { logout } from '@/app/actions/auth';
 import NavLinks from '@/components/NavLinks';
 import InstallPrompt from '@/components/InstallPrompt';
+import OrderAlertClient from '@/components/OrderAlertClient';
+import SoundTestButton from '@/components/SoundTestButton';
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const profile = await requireProfile();
@@ -30,13 +32,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
+      <OrderAlertClient role={profile.role} vendorId={profile.vendor_id} />
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <Link href="/" className="font-semibold text-ink no-underline">Guest Post Portal</Link>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <span className="hidden max-w-[16rem] truncate text-sm text-muted sm:inline">
               {profile.role === 'admin' ? 'Admin' : profile.vendor_name} · {profile.email}
             </span>
+            <SoundTestButton />
             <InstallPrompt />
             <form action={logout}>
               <button type="submit" className="btn btn-ghost btn-sm">Sign out</button>

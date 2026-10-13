@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { fmtDate, fmtDateTime, money } from '@/lib/format';
 import ActionForm from '@/components/ActionForm';
 import ActionButton from '@/components/ActionButton';
+import AlertBellButton from '@/components/AlertBellButton';
 import OrderFields from '@/components/OrderFields';
 import Pager from '@/components/Pager';
 import StatusBadge from '@/components/StatusBadge';
@@ -34,7 +35,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
   let query = supabase
     .from('orders')
-    .select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,sheet_status,last_checked_at,index_error,source_tab,pair,article_url', { count: 'exact' })
+    .select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,sheet_status,last_checked_at,index_error,source_tab,pair,article_url,alerted_at', { count: 'exact' })
     .order('order_date', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
@@ -126,7 +127,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <td className="td text-muted">{o.sheet_status === 'indexed' ? 'Indexed' : o.sheet_status === 'not_indexed' ? 'Not indexed' : '-'}</td>
                 <td className="td text-muted">{o.last_checked_at ? fmtDateTime(o.last_checked_at) : '-'}</td>
                 <td className="td">
-                  <div className="flex flex-wrap items-start gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {o.vendor_id && (
+                      <AlertBellButton orderId={o.id} vendorName={o.vendor_name} alertedAt={o.alerted_at} />
+                    )}
                     {o.live_url && o.order_status !== 'cancelled' && <ActionButton action={checkOrderAction.bind(null, o.id)} label="Check now" />}
                     <Link href={`/admin/orders/${o.id}`} className="btn btn-ghost btn-sm no-underline">Edit</Link>
                   </div>

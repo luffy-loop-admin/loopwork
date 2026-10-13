@@ -75,6 +75,15 @@ export default function OrderFields({ vendors, order, after }: { vendors: Vendor
         <label className="label" htmlFor="notes">Notes</label>
         <input id="notes" name="notes" className="input" defaultValue={order?.notes ?? ''} />
       </div>
+      {!order?.id && (
+        <div className="sm:col-span-2 pt-2">
+          <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-medium text-foreground">
+            <input type="checkbox" name="ring_vendor" defaultChecked className="h-4 w-4 rounded border-line text-accent focus:ring-accent" />
+            <span>🔔 Ring vendor&apos;s phone / device when this order is saved</span>
+          </label>
+          <p className="ml-6 text-xs text-muted">Plays the &quot;New order from Loop&quot; ringtone on the vendor&apos;s logged-in device.</p>
+        </div>
+      )}
     </div>
   );
 }

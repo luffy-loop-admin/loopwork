@@ -1,7 +1,7 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { getAdmin } from '@/lib/auth';
+import { getAdmin, requireProfile } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { CURRENCY } from '@/lib/config';
 import { cleanUrl, normalizeDomain } from '@/lib/domain';
@@ -70,12 +70,19 @@ export async function saveOrder(formData: FormData): Promise<ActionResult> {
   }
 
   if (INDEX_STATUSES.includes(indexIn)) row.indexed_status = indexIn;
+
+  const ringVendor = formData.get('ring_vendor');
+  if (vendorId && (ringVendor === 'on' || ringVendor === 'true')) {
+    row.alerted_at = new Date().toISOString();
+    row.acknowledged_at = null;
+  }
+
   const { error } = await db.from('orders').insert(row);
   if (error) return { ok: false, message: error.message };
   refresh();
   const after = str(formData, 'after');
   if (after.startsWith('/admin/')) redirect(after);
-  return { ok: true, message: vendorName ? `Order added and assigned to ${vendorName}.` : 'Order added.' };
+  return { ok: true, message: vendorName ? (row.alerted_at ? `Order added and ringing ${vendorName}'s device! 🔔` : `Order added and assigned to ${vendorName}.`) : 'Order added.' };
 }
 
 export async function deleteOrder(id: string): Promise<ActionResult> {
@@ -114,3 +121,60 @@ export async function checkAllAction(): Promise<ActionResult> {
     return { ok: false, message: e instanceof Error ? e.message : 'Check failed.' };
   }
 }
+
+/** Admin rings/alerts the vendor for a specific order */
+export async function alertOrderVendorAction(orderId: string): Promise<ActionResult> {
+  if (!(await getAdmin())) return DENIED;
+  const db = createAdminClient();
+  const { data: order } = await db.from('orders').select('id,domain,vendor_id,vendor_name').eq('id', orderId).maybeSingle();
+  if (!order) return { ok: false, message: 'Order not found.' };
+  if (!order.vendor_id) return { ok: false, message: 'This order has no assigned vendor to alert.' };
+
+  const { error } = await db.from('orders').update({
+    alerted_at: new Date().toISOString(),
+    acknowledged_at: null,
+  }).eq('id', orderId);
+
+  if (error) return { ok: false, message: error.message };
+  refresh();
+  return { ok: true, message: `🔔 Alert sent! Ringing ${order.vendor_name || 'vendor'}'s device.` };
+}
+
+/** Vendor stops the ringtone and acknowledges the order alert */
+export async function acknowledgeOrderAlertAction(orderId: string): Promise<ActionResult> {
+  const profile = await requireProfile();
+  const db = createAdminClient();
+  let q = db.from('orders').update({ acknowledged_at: new Date().toISOString() }).eq('id', orderId);
+  if (profile.role !== 'admin' && profile.vendor_id) {
+    q = q.eq('vendor_id', profile.vendor_id);
+  }
+  const { error } = await q;
+  if (error) return { ok: false, message: error.message };
+  refresh();
+  return { ok: true, message: 'Alert acknowledged.' };
+}
+
+/** Vendor device checks for any active ringing order alerts */
+export async function getActiveOrderAlertAction(): Promise<{
+  hasAlert: boolean;
+  order?: { id: string; domain: string; price_paid: number | null; currency: string; order_date: string | null; alerted_at: string };
+}> {
+  const profile = await requireProfile();
+  if (profile.role !== 'vendor' || !profile.vendor_id) return { hasAlert: false };
+  const db = createAdminClient();
+  const { data } = await db
+    .from('orders')
+    .select('id,domain,price_paid,currency,order_date,alerted_at')
+    .eq('vendor_id', profile.vendor_id)
+    .not('alerted_at', 'is', null)
+    .is('acknowledged_at', null)
+    .order('alerted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (data) {
+    return { hasAlert: true, order: data as any };
+  }
+  return { hasAlert: false };
+}
+

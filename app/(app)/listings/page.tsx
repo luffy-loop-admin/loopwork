@@ -1,10 +1,25 @@
 import Link from 'next/link';
 import { requireProfile } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
-import { money, num } from '@/lib/format';
+import { fmtDate, money } from '@/lib/format';
 import Pager from '@/components/Pager';
 
 const PAGE_SIZE = 50;
+
+function PaymentBadge({ status }: { status: string | null }) {
+  if (!status) return <span className="text-muted">-</span>;
+  const s = status.trim().toLowerCase();
+  if (/paid|clear|done|received/i.test(s) && !/not|un/i.test(s)) {
+    return <span className="badge bg-good-soft text-good">{status}</span>;
+  }
+  if (/pending|remaining|due|partial/i.test(s)) {
+    return <span className="badge bg-warn-soft text-warn">{status}</span>;
+  }
+  if (/unpaid|not paid|failed/i.test(s)) {
+    return <span className="badge bg-bad-soft text-bad">{status}</span>;
+  }
+  return <span className="badge bg-paper text-muted border border-line">{status}</span>;
+}
 
 export default async function ListingsPage({ searchParams }: { searchParams: Promise<{ q?: string; vendor?: string; page?: string }> }) {
   const sp = await searchParams;
@@ -17,7 +32,7 @@ export default async function ListingsPage({ searchParams }: { searchParams: Pro
 
   let query = supabase
     .from('vendor_sites')
-    .select('id,domain,price,currency,da,dr,traffic,niche,vendors(name)', { count: 'exact' })
+    .select('id,domain,price,currency,payment_status,payment_date,vendors(name)', { count: 'exact' })
     .order('price', { ascending: true, nullsFirst: false })
     .order('domain', { ascending: true })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
@@ -53,10 +68,8 @@ export default async function ListingsPage({ searchParams }: { searchParams: Pro
               <th className="th">Website</th>
               {isAdmin && <th className="th">Vendor</th>}
               <th className="th">Price</th>
-              <th className="th">DA</th>
-              <th className="th">DR</th>
-              <th className="th">Traffic</th>
-              <th className="th">Niche</th>
+              <th className="th">Payment status</th>
+              <th className="th">Date</th>
             </tr>
           </thead>
           <tbody>
@@ -66,15 +79,13 @@ export default async function ListingsPage({ searchParams }: { searchParams: Pro
                 <tr key={r.id}>
                   <td className="td font-medium"><Link className="link" href={`/search?q=${encodeURIComponent(r.domain)}`}>{r.domain}</Link></td>
                   {isAdmin && <td className="td">{v?.name ?? '-'}</td>}
-                  <td className="td">{money(r.price, r.currency)}</td>
-                  <td className="td">{r.da ?? '-'}</td>
-                  <td className="td">{r.dr ?? '-'}</td>
-                  <td className="td">{num(r.traffic)}</td>
-                  <td className="td">{r.niche ?? '-'}</td>
+                  <td className="td font-semibold">{money(r.price, r.currency)}</td>
+                  <td className="td"><PaymentBadge status={r.payment_status} /></td>
+                  <td className="td text-muted">{fmtDate(r.payment_date)}</td>
                 </tr>
               );
             })}
-            {rows.length === 0 && <tr><td className="td text-muted" colSpan={isAdmin ? 7 : 6}>No sites found.</td></tr>}
+            {rows.length === 0 && <tr><td className="td text-muted" colSpan={isAdmin ? 5 : 4}>No sites found.</td></tr>}
           </tbody>
         </table>
       </div>

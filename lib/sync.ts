@@ -44,12 +44,14 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
 
   type SiteRec = {
     source_id: string; vendor_id: string; domain: string; site_url: string | null; price: number | null;
-    currency: string; da: number | null; dr: number | null; traffic: number | null; niche: string | null; synced_at: string;
+    currency: string; da: number | null; dr: number | null; traffic: number | null; niche: string | null;
+    payment_status?: string | null; payment_date?: string | null; synced_at: string;
   };
   type OrderRec = {
     source_id: string; source_key: string; source_tab: string; domain: string; live_url: string | null; vendor_id: string | null;
     vendor_name: string | null; order_date: string | null; price_paid: number | null; currency: string; notes: string | null;
     sheet_status: 'indexed' | 'not_indexed' | null; order_status: 'live' | 'ordered'; pair: string | null; article_url: string | null;
+    payment_status?: string | null;
   };
   type PayRec = {
     source_id: string; source_key: string; vendor_id: string | null; vendor_name: string | null;
@@ -71,6 +73,8 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
       live: colIndex(t.headers, m.live_url), status: colIndex(t.headers, m.status), date: colIndex(t.headers, m.date),
       article: colIndex(t.headers, m.article), pair: colIndex(t.headers, m.pair), vendor: colIndex(t.headers, m.vendor),
       notes: colIndex(t.headers, m.notes),
+      payment_status: colIndex(t.headers, m.payment_status),
+      payment_date: colIndex(t.headers, m.payment_date),
     };
     if (idx.site < 0 && idx.live < 0) {
       skippedTabs.push(t.tab);
@@ -98,6 +102,8 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
       const doc = cellText(cell(r, idx.article));
       const pair = cellText(cell(r, idx.pair));
       const notes = cellText(cell(r, idx.notes));
+      const paymentStatus = cellText(cell(r, idx.payment_status));
+      const paymentDate = parseDate(cell(r, idx.payment_date)) ?? date;
 
       if (!domain) {
         // Detect payment lines at the bottom of the sheet (e.g. "30,000 Only Index links Payment", "700 Remaining")
@@ -105,7 +111,7 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
         const isPaymentRow = /pay|paid|payment|remaining|advance|sent|transferred|deposit/i.test(rowText);
         const amount = price ?? parseMoney(cell(r, idx.live)) ?? parseMoney(cell(r, idx.site));
         if (amount && amount > 0 && isPaymentRow && src.vendor_id) {
-          const paidDate = date ?? parseDate(rowText) ?? startedAt.slice(0, 10);
+          const paidDate = date ?? paymentDate ?? parseDate(rowText) ?? startedAt.slice(0, 10);
           const pNote = doc ?? cellText(cell(r, idx.status)) ?? cellText(cell(r, idx.notes)) ?? rowText.slice(0, 150);
           const pKey = `p:${src.id}|${amount}|${paidDate}|${pNote?.slice(0, 20) ?? ''}`;
           paymentsMap.set(pKey, {
@@ -138,6 +144,8 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
           dr: parseIntSafe(cell(r, idx.dr)),
           traffic: parseIntSafe(cell(r, idx.traffic)),
           niche: cellText(cell(r, idx.niche)),
+          payment_status: paymentStatus,
+          payment_date: paymentDate,
           synced_at: startedAt,
         };
         const prev = sitesMap.get(domain);
@@ -163,7 +171,7 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
           live_url: live,
           vendor_id: vendorId ?? src.vendor_id,
           vendor_name: vendorName,
-          order_date: date,
+          order_date: date ?? paymentDate,
           price_paid: price, // strictly the price written in front of the site in this row!
           currency,
           notes,
@@ -171,6 +179,7 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
           order_status: live ? 'live' : 'ordered',
           pair,
           article_url: doc,
+          payment_status: paymentStatus,
         });
       }
     }
@@ -267,6 +276,7 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
     source_id: string; source_key: string; source_tab: string; domain: string; live_url: string | null; vendor_id: string | null;
     vendor_name: string | null; order_date: string | null; price_paid: number | null; currency: string; notes: string | null;
     sheet_status: 'indexed' | 'not_indexed' | null; order_status: 'live' | 'ordered'; pair: string | null; article_url: string | null;
+    payment_status?: string | null;
   };
   const map = new Map<string, Rec>();
   const usedTabs: string[] = [];
@@ -279,6 +289,7 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
       date: colIndex(t.headers, m.date), price: colIndex(t.headers, m.price), currency: colIndex(t.headers, m.currency),
       status: colIndex(t.headers, m.status), notes: colIndex(t.headers, m.notes),
       pair: colIndex(t.headers, m.pair), article: colIndex(t.headers, m.article),
+      payment_status: colIndex(t.headers, m.payment_status),
     };
     if (idx.site < 0 && idx.live < 0) {
       skippedTabs.push(t.tab);
@@ -307,6 +318,7 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
         order_status: live ? 'live' : 'ordered',
         pair: cellText(cell(r, idx.pair)),
         article_url: cellText(cell(r, idx.article)),
+        payment_status: cellText(cell(r, idx.payment_status)),
       });
     }
   }

@@ -1,71 +1,87 @@
-# Summary of Fixes & Updates
+# Summary of Updates & Features
 
-## 1. Serper Error 403 (Unauthorized)
-- **Why it happened:** Serper returns `403` when the `SERPER_API_KEY` in Vercel is missing, contains extra quotes/spaces from copy-pasting, or when the Serper account has exhausted credits.
-- **The fix:**
-  - `lib/indexing.ts` now automatically sanitizes `SERPER_API_KEY` (stripping leading/trailing quotes and spaces).
-  - Clear, user-friendly error messages are displayed if the key is unauthorized or missing credits, rather than crashing with raw JSON.
-- **Action required by you:**
-  1. Go to [serper.dev](https://serper.dev) -> sign in and make sure you have search credits. Copy your API key.
-  2. Go to your **Vercel Project Settings -> Environment Variables**.
-  3. Edit `SERPER_API_KEY` and paste the clean key without quotes or spaces.
-  4. Go to **Deployments -> ⋯ (three dots) -> Redeploy**.
+## 1. 📱 Download / Install App on Mobile Devices (Dashboard & Login)
+- Added an install card directly on both the **Dashboard** and the **Login page**.
+- **Android / Chrome / Edge:** One-tap "Download / Install App" button triggers the native browser install prompt.
+- **iPhone / iPad (Safari):** Displays clear, visual step-by-step instructions (*Share -> Add to Home Screen*).
+- Once installed as a PWA, it runs in full screen just like a native mobile app.
 
 ---
 
-## 2. Status Column From Sheet Not Recognized
-- **Why it happened:** Vendor spreadsheets frequently use `"Index"`, `"Live"`, or `"Published"`. Previously, the status parser required the full word `"indexed"` with a `"d"`, so `"Index"` was ignored and left as "Pending" or "Waiting for first index check".
-- **The fix:**
-  - `lib/parse.ts` has been updated with robust regex patterns supporting:
-    - **Indexed:** `Index`, `Indexing`, `Indexed`, `Live`, `Published`, `Done`, `Active`, `Yes`, `1`, `✓`, `✅`.
-    - **Not Indexed:** `Not index`, `Not indexed`, `No`, `Failed`, `Dropped`, `Rejected`, `❌`.
-    - **Pending:** `Pending`, `Wait`, `Waiting`, `In progress`, `Ordered`.
-  - When syncing, any order without a previous Google check will immediately adopt the sheet's status and clear old check errors.
+## 2. 📋 "All Listings" Section: Payment Status & Date
+- In **All listings** (`/listings`):
+  - Removed **DA**, **DR**, and **Niche** columns.
+  - Added **Payment status** with colored badges:
+    - 🟢 **Paid / Clear / Received** (Green)
+    - 🟡 **Pending / Remaining / Due** (Yellow)
+    - 🔴 **Unpaid / Not Paid** (Red)
+  - Added **Date** column displaying the date formatted cleanly.
+- Updated the sheet column matcher in `lib/fields.ts`:
+  - Recognizes `Payment Status`, `Payment`, `Paid`, `Status`, `Date`, and `Payment Date`.
+  - When you resync vendor sheets, the payment status and date are imported directly into the listings table.
 
 ---
 
-## 3. Order Count Doubling & Exact Price Calculation
-- **Why it happened:**
-  - Every row in the vendor sheet was treated as an order when the "Live Link" column was mapped in the header, even for available site listings without live links.
-  - Previous syncs accumulated duplicate orders because row counters were appended to keys.
-  - A fallback lookup was overriding or filling prices from other vendor listings instead of taking the exact price written in front of that specific site row.
-- **The fix:**
-  - `lib/sync.ts` now only creates an order record if actual order data exists (`live URL`, `order date`, or `article doc link`).
-  - Automatic cleanup removes stale/duplicate orders for that sheet source, immediately correcting the doubled order count (e.g. Sultan's orders will drop back from 48 to 24).
-  - Orders strictly use the exact price written in that row.
+## 3. 🔔 Admin Order Alert Bell & Vendor Device Ringtone
+- **Admin Side:**
+  - **Orders table (`/admin/orders`):** Next to each order with an assigned vendor, there is now a **🔔 Ring** button. Clicking it rings that vendor's device and plays a confirmation ding for the admin.
+  - **Add order (`/admin/orders/new` & dashboard):** Added a checked-by-default option:
+    `[x] 🔔 Ring vendor's phone / device when this order is saved`.
+  - **Edit order (`/admin/orders/[id]`):** Contains the bell ring button in the header.
+- **Vendor Device Side:**
+  - While logged into the portal on mobile or desktop, the portal listens for active order alerts.
+  - When an alert is triggered:
+    - **Looping Ringtone:** Melodic order ringtone chime plays repeatedly.
+    - **Voice Alert:** Speaks *"New order from Loop"* via browser speech synthesis.
+    - **Vibration:** Vibrates the mobile device (on supported Android devices).
+    - **Visual Modal:** Displays a prominent, full-screen popup with:
+      - Website name
+      - Price (PKR)
+      - Date
+      - **"🔇 Stop Ring / Got it"** button (silences sound and acknowledges alert)
+      - **"View Orders →"** button
+- **Test Sound Button:**
+  - Added a **🔔 Test Sound** button in the top navigation bar so anyone can test their speaker and hear the ringtone at any time.
 
 ---
 
-## 4. Bottom Payment Rows Auto-Import
-- **Why it happened:** Payment rows at the bottom of the vendor sheet (e.g. `30,000 | Only Index links Payment | 11 Sep` and `700 | Remaining | Paid On 25 September`) failed domain validation and were skipped, leaving paid balance at `PKR 0`.
-- **The fix:**
-  - `lib/sync.ts` now detects payment rows at the bottom of sheets and automatically imports them into the `payments` table, updating the vendor's paid total and remaining balance.
+## 🚀 Setup & Deployment Steps
+
+### Step 1: Run Supabase Migration 0004
+In your [Supabase Dashboard](https://supabase.com/dashboard) -> **SQL Editor** -> run the contents of:
+`supabase/migrations/0004_payment_status_and_alerts.sql`
+
+```sql
+-- 1) Payment status and date on vendor listings
+alter table public.vendor_sites add column if not exists payment_status text;
+alter table public.vendor_sites add column if not exists payment_date   date;
+
+-- 2) Payment status on orders
+alter table public.orders add column if not exists payment_status text;
+
+-- 3) Order alerts for vendor device notifications
+alter table public.orders add column if not exists alerted_at      timestamptz;
+alter table public.orders add column if not exists acknowledged_at timestamptz;
+
+create index if not exists orders_alerted_idx on public.orders (vendor_id, alerted_at) where alerted_at is not null;
+```
 
 ---
 
-## 5. All Vendors Visible in Dashboard & Payments
-- **Why it happened:** The dashboard and payments tables only showed vendors that already had records in `orders` or `payments`. Vendors like Junaid (who had no orders yet) were hidden.
-- **The fix:**
-  - Both `app/(app)/page.tsx` and `app/(app)/admin/payments/page.tsx` now query all active vendors, displaying all vendors even if they have 0 orders or 0 payments.
-
----
-
-## Deployment & Setup Instructions
-
-### Step 1: Ensure Supabase Migrations Are Run
-Make sure you ran the migrations in Supabase SQL Editor:
-- `supabase/migrations/0001_init.sql`
-- `supabase/migrations/0002_pkr_payments_tabs.sql`
-- `supabase/migrations/0003_order_pair_article.sql`
-
-### Step 2: Push / Upload to GitHub
+### Step 2: Deploy to Vercel
 Either:
-- Run `git push origin main` from your terminal, or
-- Download `vendor-guest-post-portal.zip`, extract it, and upload the updated files to your GitHub repository.
+1. Push to your GitHub repo:
+   ```bash
+   git push origin main
+   ```
+2. Or upload the updated files from the zip archive:
+   `/mnt/cptmukaram/vendor-guest-post-portal.zip`
 
-### Step 3: Check Vercel
-Once Vercel finishes deploying:
-1. Verify `SERPER_API_KEY` in Vercel Environment Variables.
-2. Open your web app at `https://loopwork-swart.vercel.app` (or your custom domain).
-3. Go to **Sheets** -> click **Sync now** on your vendor sheets (Sultan, Ali Jan, etc.).
-4. Go to **Orders & indexing** and **Dashboard** to see the clean, accurate numbers!
+---
+
+### Step 3: Resync Your Sheets
+1. Go to **Sheets** in the portal.
+2. If you added a new column in Google Sheets (e.g. `Payment Status` or `Payment Date`):
+   - Click **Edit** on that sheet -> **Load columns** -> verify `Payment status` is matched -> **Save & sync**.
+3. Go to **All listings** to see your updated sites with Payment Status and Date!
+4. Go to **Orders & indexing** to test the 🔔 **Ring** button!
