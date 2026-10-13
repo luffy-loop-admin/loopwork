@@ -32,6 +32,44 @@ function summary(label: string, rows: number, tabs: string[], skippedTabs: strin
   return msg;
 }
 
+async function safeUpsertSites(db: Db, records: any[]): Promise<void> {
+  for (let i = 0; i < records.length; i += CHUNK) {
+    const chunk = records.slice(i, i + CHUNK);
+    const { error } = await db.from('vendor_sites').upsert(chunk, { onConflict: 'source_id,domain' });
+    if (error) {
+      if (error.message.includes('payment_status') || error.message.includes('payment_date') || error.code === '42703') {
+        const stripped = chunk.map((r: any) => {
+          const { payment_status, payment_date, ...rest } = r;
+          return rest;
+        });
+        const { error: retryErr } = await db.from('vendor_sites').upsert(stripped, { onConflict: 'source_id,domain' });
+        if (retryErr) throw new Error(`Database error while saving sites: ${retryErr.message}`);
+      } else {
+        throw new Error(`Database error while saving sites: ${error.message}`);
+      }
+    }
+  }
+}
+
+async function safeUpsertOrders(db: Db, records: any[]): Promise<void> {
+  for (let i = 0; i < records.length; i += CHUNK) {
+    const chunk = records.slice(i, i + CHUNK);
+    const { error } = await db.from('orders').upsert(chunk, { onConflict: 'source_id,source_key' });
+    if (error) {
+      if (error.message.includes('payment_status') || error.code === '42703') {
+        const stripped = chunk.map((r: any) => {
+          const { payment_status, ...rest } = r;
+          return rest;
+        });
+        const { error: retryErr } = await db.from('orders').upsert(stripped, { onConflict: 'source_id,source_key' });
+        if (retryErr) throw new Error(`Database error while saving orders: ${retryErr.message}`);
+      } else {
+        throw new Error(`Database error while saving orders: ${error.message}`);
+      }
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ vendor price lists & orders */
 async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missing: string[], startedAt: string): Promise<SyncResult> {
   const m = src.mapping || {};
@@ -154,14 +192,15 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
         }
       }
 
-      // 2. Order record: only if this row has actual order data (live URL, order date, or article doc)
-      const isOrder = !!(live || date || doc);
-      if (isOrder) {
+      // 2. Order record (if live link, date, article/doc, status, pair, or payment status exists, or order column mapped)
+      const hasOrderData = !!(live || date || doc || st || pair || paymentStatus);
+      const hasOrderMapping = idx.live >= 0 || idx.date >= 0 || idx.article >= 0 || idx.status >= 0 || idx.payment_status >= 0;
+      if (hasOrderData || hasOrderMapping) {
         const key = live
           ? `u:${live.toLowerCase()}`
           : (doc
             ? `a:${doc.toLowerCase()}`
-            : `d:${domain}|${date ?? ''}`);
+            : `d:${domain}|${date ?? ''}|${(vendorName ?? '').toLowerCase()}#${rowCounter}`);
 
         ordersMap.set(key, {
           source_id: src.id,
@@ -195,30 +234,15 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
   // 1. Save vendor sites
   if (sitesMap.size > 0 && src.vendor_id) {
     const records = Array.from(sitesMap.values());
-    for (let i = 0; i < records.length; i += CHUNK) {
-      const { error } = await db.from('vendor_sites').upsert(records.slice(i, i + CHUNK), { onConflict: 'source_id,domain' });
-      if (error) throw new Error(`Database error while saving sites: ${error.message}`);
-    }
+    await safeUpsertSites(db, records);
     const { error: delErr } = await db.from('vendor_sites').delete().eq('source_id', src.id).lt('synced_at', startedAt);
     if (delErr) throw new Error(`Database error while cleaning old sites: ${delErr.message}`);
   }
 
-  // 2. Save orders & clean up stale/duplicate orders for this sheet
+  // 2. Save orders (NEVER delete orders! Orders are historical purchases and indexing records)
   if (ordersMap.size > 0) {
     const records = Array.from(ordersMap.values());
-    for (let i = 0; i < records.length; i += CHUNK) {
-      const { error } = await db.from('orders').upsert(records.slice(i, i + CHUNK), { onConflict: 'source_id,source_key' });
-      if (error) throw new Error(`Database error while saving orders: ${error.message}`);
-    }
-
-    // Clean up duplicate or removed orders that belong to this sheet source
-    const { data: existingOrders } = await db.from('orders').select('id,source_key').eq('source_id', src.id);
-    const staleIds = (existingOrders ?? []).filter((o: any) => !ordersMap.has(o.source_key)).map((o: any) => o.id);
-    if (staleIds.length > 0) {
-      for (let i = 0; i < staleIds.length; i += 100) {
-        await db.from('orders').delete().in('id', staleIds.slice(i, i + 100));
-      }
-    }
+    await safeUpsertOrders(db, records);
 
     // Apply sheet index status to orders that have not yet been checked by Serper on Google
     for (const status of ['indexed', 'not_indexed'] as const) {
@@ -328,10 +352,7 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
 
   // Upsert only touches the columns above, so Google-check history of existing orders is preserved.
   const records = Array.from(map.values());
-  for (let i = 0; i < records.length; i += CHUNK) {
-    const { error } = await db.from('orders').upsert(records.slice(i, i + CHUNK), { onConflict: 'source_id,source_key' });
-    if (error) throw new Error(`Database error while saving orders: ${error.message}`);
-  }
+  await safeUpsertOrders(db, records);
 
   // The sheet's Status column drives the portal status for links that have not been checked on Google yet.
   for (const status of ['indexed', 'not_indexed'] as const) {

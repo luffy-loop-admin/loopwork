@@ -50,11 +50,26 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     return (await c).count ?? 0;
   };
 
-  const [{ data, count }, vendorsRes, cAll, cNot, cPending, cIdx] = await Promise.all([
-    query,
-    supabase.from('vendors').select('id,name').order('name'),
-    countFor('all'), countFor('not_indexed'), countFor('pending'), countFor('indexed'),
-  ]);
+  const vendorsPromise = supabase.from('vendors').select('id,name').order('name');
+  const countPromises = Promise.all([countFor('all'), countFor('not_indexed'), countFor('pending'), countFor('indexed')]);
+
+  let { data, count, error } = await query;
+  if (error) {
+    let fallback = supabase
+      .from('orders')
+      .select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,sheet_status,last_checked_at,index_error,source_tab,pair,article_url', { count: 'exact' })
+      .order('order_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+    if (status !== 'all') fallback = fallback.eq('indexed_status', status).not('live_url', 'is', null);
+    if (vendorFilter) fallback = fallback.eq('vendor_id', vendorFilter);
+    if (q) fallback = fallback.or(`domain.ilike.%${q}%,vendor_name.ilike.%${q}%`);
+    const fbRes = await fallback;
+    data = fbRes.data;
+    count = fbRes.count;
+  }
+
+  const [vendorsRes, [cAll, cNot, cPending, cIdx]] = await Promise.all([vendorsPromise, countPromises]);
   const counts: Record<string, number> = { all: cAll, not_indexed: cNot, pending: cPending, indexed: cIdx };
   const rows = (data ?? []) as any[];
   const vendors = (vendorsRes.data ?? []) as { id: string; name: string }[];

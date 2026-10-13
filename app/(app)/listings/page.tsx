@@ -38,11 +38,24 @@ export default async function ListingsPage({ searchParams }: { searchParams: Pro
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   if (q) query = query.ilike('domain', `%${q}%`);
   if (vendorFilter) query = query.eq('vendor_id', vendorFilter);
+  const vendorsPromise = isAdmin ? supabase.from('vendors').select('id,name').order('name') : Promise.resolve({ data: [] as any[] });
 
-  const [{ data, count }, vendorsRes] = await Promise.all([
-    query,
-    isAdmin ? supabase.from('vendors').select('id,name').order('name') : Promise.resolve({ data: [] as any[] }),
-  ]);
+  let { data, count, error } = await query;
+  if (error) {
+    let fallback = supabase
+      .from('vendor_sites')
+      .select('id,domain,price,currency,vendors(name)', { count: 'exact' })
+      .order('price', { ascending: true, nullsFirst: false })
+      .order('domain', { ascending: true })
+      .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+    if (q) fallback = fallback.ilike('domain', `%${q}%`);
+    if (vendorFilter) fallback = fallback.eq('vendor_id', vendorFilter);
+    const fbRes = await fallback;
+    data = fbRes.data;
+    count = fbRes.count;
+  }
+
+  const vendorsRes = await vendorsPromise;
   const rows = (data ?? []) as any[];
   const vendors = (vendorsRes.data ?? []) as { id: string; name: string }[];
 

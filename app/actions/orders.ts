@@ -63,7 +63,13 @@ export async function saveOrder(formData: FormData): Promise<ActionResult> {
     } else if (INDEX_STATUSES.includes(indexIn)) {
       row.indexed_status = indexIn;
     }
-    const { error } = await db.from('orders').update(row).eq('id', id);
+    let { error } = await db.from('orders').update(row).eq('id', id);
+    if (error && (error.message.includes('alerted_at') || (error as any).code === '42703')) {
+      delete row.alerted_at;
+      delete row.acknowledged_at;
+      const retry = await db.from('orders').update(row).eq('id', id);
+      error = retry.error;
+    }
     if (error) return { ok: false, message: error.message };
     refresh();
     redirect('/admin/orders');
@@ -77,7 +83,13 @@ export async function saveOrder(formData: FormData): Promise<ActionResult> {
     row.acknowledged_at = null;
   }
 
-  const { error } = await db.from('orders').insert(row);
+  let { error } = await db.from('orders').insert(row);
+  if (error && (error.message.includes('alerted_at') || (error as any).code === '42703')) {
+    delete row.alerted_at;
+    delete row.acknowledged_at;
+    const retry = await db.from('orders').insert(row);
+    error = retry.error;
+  }
   if (error) return { ok: false, message: error.message };
   refresh();
   const after = str(formData, 'after');
@@ -135,7 +147,12 @@ export async function alertOrderVendorAction(orderId: string): Promise<ActionRes
     acknowledged_at: null,
   }).eq('id', orderId);
 
-  if (error) return { ok: false, message: error.message };
+  if (error) {
+    if (error.message.includes('alerted_at') || (error as any).code === '42703') {
+      return { ok: false, message: 'Alert column not added in Supabase yet. Please run migration 0004 in Supabase SQL editor.' };
+    }
+    return { ok: false, message: error.message };
+  }
   refresh();
   return { ok: true, message: `🔔 Alert sent! Ringing ${order.vendor_name || 'vendor'}'s device.` };
 }

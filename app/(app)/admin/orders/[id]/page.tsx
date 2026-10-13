@@ -10,11 +10,13 @@ import { deleteOrder, saveOrder } from '@/app/actions/orders';
 export default async function EditOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
-  const [{ data: order }, { data: vendors }] = await Promise.all([
-    supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url,alerted_at').eq('id', id).maybeSingle(),
-    supabase.from('vendors').select('id,name').order('name'),
-  ]);
+  let { data: order, error } = await supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url,alerted_at').eq('id', id).maybeSingle();
+  if (error || !order) {
+    const fb = await supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url').eq('id', id).maybeSingle();
+    order = fb.data;
+  }
   if (!order) notFound();
+  const { data: vendors } = await supabase.from('vendors').select('id,name').order('name');
 
   return (
     <div className="space-y-4">
