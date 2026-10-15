@@ -106,3 +106,149 @@ Either:
    ```
 2. Or upload the updated files from the zip archive:
    `/mnt/cptmukaram/vendor-guest-post-portal.zip`
+
+---
+
+## 5. 📗 Update 5: Vendor Ledger, Multi-Tab Sync, Google Sheets Write-Back, All Listings Rebuild & UI Cleanup
+
+### 🌟 Overview of Features (Plain Language)
+
+#### Feature A: "Vendor Ledger" Sheet Type & Balance Calculation
+- **Vendor-bound Ledger:** Added a new sheet source kind: `ledger`. A ledger sheet belongs to exactly one vendor and handles both their bought links (across month tabs) and payment history (from a payment tab) in a single Google Spreadsheet.
+- **Strict Row Filtering (No False Totals):** The importer strictly requires a valid Live Link in each order row. Rows without a live link (such as row 6 summary totals `20000`, row 7 `Remaining 1500 paid`, labels, or empty rows) are completely ignored. Their numbers are **never** added to totals or balances.
+- **Accurate Price Calculation:** Only the price written in column B on the exact same row as a valid live link is counted. There is no fallback to price list rates for ledger orders. Rows with a valid link but missing/empty price are saved with `price_paid = null` (contributing 0 PKR).
+- **Payment History without "Remaining":** Automatically imports payments from the `Payment History` tab while strictly ignoring any running balance/remaining columns (headers matching `remain`, `balance`, `total`, `due`, `left`).
+- **Computed Balance:** Order spend is summed from real orders (`ordered_total`), payments are summed from real payments (`paid_total`), and remaining balance is computed by `balance = ordered_total - paid_total` (PKR).
+- **Dry-run Ledger Preview:** Added a **"Preview (don't save)"** button in the Sheet Form and a **"Preview"** button on every ledger row in Admin Sheets. This lets you dry-run the Google Sheet parsing before saving or syncing, showing:
+  - Tabs read and row counts
+  - Total PKR of bought links
+  - Skipped row breakdown (no live link, duplicate URL, missing price)
+  - Payments detected and total PKR paid
+  - Resulting calculated balance (PKR)
+  - Sample parsed rows
+
+#### Feature B: Month and Week Inference
+- **Smart Month Detection:** `inferMonthFromTabName` detects months from tab titles such as `August Links`, `September Links`, `July`, `Sept`, or `October`. Extra words like "Links" are stripped.
+- **Reference Year:** Determined from the first parseable date in the tab, the most frequent year across all dates in the ledger, or the current year in `Asia/Karachi`.
+- **Monday-based Karachi Weeks:** `weekStart` and `weekLabel` compute weeks starting on Monday according to the `Asia/Karachi` timezone (e.g. "Week of 10 Aug 2026").
+- **Date Fallback:** If an order has an empty Date cell, it falls back to `order_month` (1st day of the inferred month) so it still appears under the correct month filter.
+
+#### Feature C: Tab Multi-Selection & Smart Defaults
+- **"Load Tabs" Button:** An admin-only API route (`/api/admin/sheet-tabs`) reads all sheet tab names live via the Google Sheets API.
+- **Dual Tab Selectors:**
+  - Checkboxes for selecting multiple Month/Order tabs (`order_tabs`).
+  - Dropdown selector for the Payment tab (`payment_tab`).
+- **Smart Defaults:** Pre-selects any tab whose name contains a month name, pre-selects tabs containing `payment` for the payment tab, and ignores other tabs.
+- **"Automatically include new month tabs":** When enabled (default ON), future syncs automatically detect and import newly created month tabs without requiring manual re-configuration.
+- **Multi-Tab Vendor Price Lists:** The tab selector also works for standard `vendor` price lists, allowing master spreadsheets with multiple tabs to be imported with tab tracking (`vendor_sites.source_tab`).
+
+#### Feature D: Google Sheets Status Write-Back
+- **Automatic Status Sync to Google Sheets:** When links are checked on Google (via Serper), the status (`Indexed` or `Not indexed`) is written directly back to the `Status` column in the vendor's Google Sheet.
+- **Dynamic Row Resolution:** Rows are found at write time by matching live URLs, ensuring changes in sheet row ordering or row insertions never cause misplaced writes.
+- **Idempotent & Quota-Friendly:** Uses `values:batchUpdate` and only writes if the cell value differs. Skips pending checks.
+- **Editor Permission Notice:** Writing requires the Google Service Account to have **Editor** access to the spreadsheet. Read-only sync works with **Viewer** access. If write-back fails (e.g. 403 Forbidden due to Viewer-only permission), the index check still succeeds, and a clear notice appears in the Sheets list: *"Share this sheet with the service account as Editor"*.
+- **Per-Sheet Toggle:** A "Write indexing status back to this sheet" toggle is available on ledger and orders sheets when the Status column is mapped.
+
+#### Feature E: Rebuilt "All Listings" Page (`/listings`)
+- **Admin Vendor Tab Strip:** A horizontally scrollable tab strip with `All` and tabs for each active vendor.
+- **Segmented View:**
+  - **📋 Links bought (Ledger):** Shows Date, Site, Price (PKR), Live link, Article doc, Index status, and Source Tab. Includes filters for Month, Week, Tab, and Search query, a totals summary bar (number of links and total PKR), plus Ordered / Paid / Balance cards.
+  - **💲 Price list:** Shows standard price list entries with a Tab filter for multi-tab sheets.
+- **Vendor View:** When logged in as a vendor, the view is automatically scoped to their own data only, without administrative tabs.
+
+#### Feature F: UI Cleanup & Simplified Install Prompt
+- **Login Page Cleanup:** Removed install prompt cards and banners from `/login`. The login page now contains only the clean login form.
+- **Dashboard Cleanup:** Removed install banners from the dashboard.
+- **Clean Install Button:** A single minimal `📱 Install app` button remains in the navigation header, displayed only when the browser fires `beforeinstallprompt`.
+
+---
+
+### 📁 Changed & Created Files
+
+| File | Type | Description |
+|---|---|---|
+| `supabase/migrations/0005_vendor_ledger.sql` | Created | Idempotent migration adding `ledger` kind check, source settings (`order_tabs`, `auto_include_new_tabs`, `payment_tab`, `payment_mapping`, `require_live_link`, `write_status_back`, `last_writeback_at`, `last_writeback_error`), `vendor_sites.source_tab`, `orders.order_month`, indexes, and RLS policies. |
+| `lib/sheets-types.ts` | Created | Pure TypeScript helpers for column letters/indexes (`colLetter`, `colIndex`) and write-back batch range construction (`buildWritebackRanges`). Keeps pure logic decoupled from server-only code. |
+| `lib/ledger.ts` | Created | Pure parsing and inference engine: `inferMonthFromTabName`, `weekStart`, `weekLabel`, `parseLedgerOrders`, `parseLedgerPayments`, and `previewLedger`. |
+| `lib/sheets.ts` | Modified | Added `getWriteClient` with write scope, `writeIndexStatusToSheet` with batch updates and dynamic row matching, and re-exported column helpers. |
+| `lib/fields.ts` | Modified | Added `'ledger'` to `SheetKind`, defined `LEDGER_ORDER_FIELDS` and `LEDGER_PAYMENT_FIELDS` with exclusion rules for remaining/balance columns. |
+| `lib/sync.ts` | Modified | Implemented `syncLedgerSheet`, `previewLedgerSource`, `previewLedgerFromParams`, automatic inclusion of new month tabs, fallback safe upserts, and added ledger sources to `syncAllSources`. |
+| `lib/indexing.ts` | Modified | Added `triggerWritebackForOrders` to invoke Google Sheets write-back after Serper index checks. |
+| `app/api/admin/sheet-tabs/route.ts` | Created | Admin-only API route handler returning tab names for a spreadsheet. |
+| `components/SheetForm.tsx` | Modified | Added "Load tabs" button, multi-select checkboxes for order tabs, payment tab dropdown, dual column mappings (orders & payments), preview modal launcher, and write-back toggle. |
+| `components/LedgerPreviewModal.tsx` | Created | Modal displaying dry-run preview: tabs read, link count, total PKR, payment count, paid PKR, calculated balance, skipped reasons, and sample rows. |
+| `components/SheetPreviewButton.tsx` | Created | Client component button embedded in Admin Sheets table to open the preview modal. |
+| `components/InstallPrompt.tsx` | Modified | Streamlined to a single minimal button rendered only when `beforeinstallprompt` event is received. |
+| `app/actions/sheets.ts` | Modified | Updated `saveSource` to handle `ledger` fields, and added server actions `previewLedgerAction` and `previewLedgerSourceAction`. |
+| `app/(app)/listings/page.tsx` | Modified | Completely rebuilt with admin vendor tabs, segmented "Links bought" vs "Price list" views, month/week/tab filters, totals bar, and balance cards. |
+| `app/(app)/admin/sheets/page.tsx` | Modified | Added "Add vendor ledger" button, write-back error notices with Editor permission hint, and Preview button per ledger sheet. |
+| `app/(app)/admin/sheets/new/page.tsx` | Modified | Supported `'ledger'` kind initialization. |
+| `app/(app)/admin/sheets/[id]/page.tsx` | Modified | Supported `'ledger'` kind editing and configuration. |
+| `app/(app)/admin/orders/page.tsx` | Modified | Added defensive fallback for orders query. |
+| `app/(app)/admin/orders/[id]/page.tsx` | Modified | Added defensive fallback for order detail query. |
+| `app/(app)/page.tsx` | Modified | Removed install prompt banners. |
+| `app/login/page.tsx` | Modified | Removed install prompt card and wrapper. |
+| `scripts/test-ledger.mjs` | Created | Unit test suite verifying month inference, week helpers, date/domain normalization, Section 9 August tab fixture, payment fixture, balance calculation, and idempotent write-back ranges. |
+| `package.json` | Modified | Added `tsx` to devDependencies and added `"test": "tsx scripts/test-ledger.mjs"` script. |
+
+---
+
+### 📝 Assumptions Made
+
+1. **Vendor Ledger Structure:** Each vendor spreadsheet represents links purchased from that specific vendor. There is no `Vendor` column inside the sheet because the vendor is identified by the spreadsheet ownership.
+2. **Order Qualification:** Only rows with a valid URL in the Live link column are counted as orders. Summary rows (e.g. orange total row `20000`, green remaining row `1500`, label rows) are discarded.
+3. **No Price Fallback:** For ledger sheets, order prices are read directly from column B of that row. If empty or non-numeric, `price_paid` is set to `null` (contributing 0 PKR) without looking up prices in the vendor's price list.
+4. **Duplicate Live URLs:** If the same live link appears across multiple tabs in a ledger, the later tab takes precedence, and earlier occurrences are recorded as duplicate skips.
+5. **Effective Date for Filtering:** Month and week filtering uses the order's parsed Date. If the Date cell is empty, the filter falls back to the tab's inferred month (`order_month`, 1st of month).
+6. **Week Start & Timezone:** All week calculations start on Monday and are evaluated in the `Asia/Karachi` timezone (UTC+5).
+7. **Remaining Columns Excluded:** Any column in the Payment History tab matching `/remain|balance|total|due|left/i` is excluded from payment amount detection to prevent double-counting.
+8. **Write-Back Status Values:** The Status column is updated with exact string values `"Indexed"` or `"Not indexed"`. Pending checks are not written back.
+9. **Editor Permission Requirement:** Google Service Account requires Editor permission on the spreadsheet to perform write-back; Viewer permission is sufficient for read-only syncing.
+
+---
+
+### 🧪 Verification & Testing Guide
+
+#### 1. Running Unit Tests
+To run the automated test suite covering all fixtures and pure functions:
+```bash
+npm test
+```
+**Expected Output:**
+```
+--- Testing Month Inference ---
+✓ Month inference passed.
+--- Testing Week Helpers ---
+✓ Week helpers passed.
+--- Testing Date & Domain Helpers ---
+✓ Date and domain helpers passed.
+--- Testing August Tab Fixture (Section 2 & 9) ---
+✓ August tab fixture passed! Total PKR 47,000 verified.
+--- Testing Payment History Fixture ---
+✓ Payment history fixture passed! Total PKR 40,000 verified.
+--- Testing Balance Calculation & Preview ---
+✓ Resulting balance 7,000 PKR verified.
+--- Testing Write-Back Ranges (Section 9) ---
+✓ Write-back ranges test passed! F12 updated and idempotent on second run.
+
+ALL FIXTURE TESTS PASSED SUCCESSFULLY! 🎉
+```
+
+#### 2. Running TypeScript & Production Build Verification
+```bash
+npx tsc --noEmit
+npm run build
+```
+Both commands must exit with code 0 and zero errors.
+
+#### 3. Running Database Migration
+In the Supabase SQL Editor, run:
+`supabase/migrations/0005_vendor_ledger.sql`
+This will add the new ledger columns and update RLS policies safely and idempotently.
+
+#### 4. Testing Google Sheets Write-Back
+1. Share your Google Sheet with the Service Account email as **Editor**.
+2. In Admin -> Sheets, edit the ledger source, enable **"Write indexing status back to this sheet"**, and ensure the Status column is mapped.
+3. Check indexing for an order on the Orders page.
+4. Verify that the Google Sheet cell in the Status column on that link's row is updated to `Indexed` or `Not indexed`.
+

@@ -25,8 +25,21 @@ export default async function EditSheetPage({ params }: { params: Promise<{ id: 
         serviceEmail={serviceAccountEmail()}
         action={saveSource}
         initial={{
-          id: s.id, vendor_id: s.vendor_id, label: s.label, sheet_url: s.sheet_url, tab_name: s.tab_name,
-          header_row: s.header_row, default_currency: s.default_currency, active: s.active, mapping: s.mapping ?? {},
+          id: s.id,
+          vendor_id: s.vendor_id,
+          label: s.label,
+          sheet_url: s.sheet_url,
+          tab_name: s.tab_name,
+          order_tabs: s.order_tabs,
+          auto_include_new_tabs: s.auto_include_new_tabs,
+          payment_tab: s.payment_tab,
+          payment_mapping: s.payment_mapping ?? {},
+          require_live_link: s.require_live_link,
+          write_status_back: s.write_status_back,
+          header_row: s.header_row,
+          default_currency: s.default_currency,
+          active: s.active,
+          mapping: s.mapping ?? {},
         }}
       />
     </div>

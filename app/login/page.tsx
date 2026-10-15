@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getSessionProfile } from '@/lib/auth';
 import LoginForm from './LoginForm';
-import InstallPrompt from '@/components/InstallPrompt';
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
@@ -17,9 +16,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       )}
       <div className="card mt-6 p-5">
         <LoginForm />
-      </div>
-      <div className="mt-5">
-        <InstallPrompt variant="card" />
       </div>
     </main>
   );

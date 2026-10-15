@@ -1,5 +1,6 @@
 import 'server-only';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { writeIndexStatusToSheet } from '@/lib/sheets';
 
 /** "https://www.site.com/post/?a=1#x" -> "site:www.site.com/post/?a=1" */
 export function siteQuery(liveUrl: string): string {
@@ -89,5 +90,77 @@ export async function checkOrders(opts: { ids?: string[]; onlyStaleHours?: numbe
 
   await Promise.all(Array.from({ length: opts.concurrency ?? 5 }, () => worker()));
   summary.remaining = Math.max(0, rows.length - summary.checked - summary.failed);
+
+  // Trigger Google Sheet write-back if enabled for checked orders
+  if (summary.checked > 0) {
+    try {
+      await triggerWritebackForOrders(summary.results);
+    } catch (err) {
+      console.error('Sheet write-back error:', err);
+    }
+  }
+
   return summary;
+}
+
+/**
+ * For orders whose sheet has write_status_back enabled, writes the Serper verification back to the sheet.
+ */
+export async function triggerWritebackForOrders(
+  results: { id: string; status?: 'indexed' | 'not_indexed'; error?: string }[]
+): Promise<void> {
+  const valid = results.filter((r) => r.status === 'indexed' || r.status === 'not_indexed');
+  if (!valid.length) return;
+
+  const db = createAdminClient();
+  const orderIds = valid.map((r) => r.id);
+
+  const { data: ordersData } = await db
+    .from('orders')
+    .select('id,source_id,source_tab,live_url,indexed_status')
+    .in('id', orderIds)
+    .not('source_id', 'is', null);
+
+  if (!ordersData || !ordersData.length) return;
+
+  const bySource = new Map<string, typeof ordersData>();
+  for (const o of ordersData) {
+    if (!o.source_id) continue;
+    const list = bySource.get(o.source_id) ?? [];
+    list.push(o);
+    bySource.set(o.source_id, list);
+  }
+
+  const sourceIds = Array.from(bySource.keys());
+  const { data: sourcesData } = await db
+    .from('sheet_sources')
+    .select('id,spreadsheet_id,header_row,mapping,write_status_back')
+    .in('id', sourceIds);
+
+  if (!sourcesData || !sourcesData.length) return;
+
+  for (const src of sourcesData) {
+    if (!src.write_status_back) continue;
+    const mapping = (src.mapping || {}) as Record<string, string>;
+    if (!mapping.status || !mapping.live_url) continue;
+
+    const sourceOrders = bySource.get(src.id) ?? [];
+    const items = sourceOrders
+      .filter((o) => o.source_tab && o.live_url && (o.indexed_status === 'indexed' || o.indexed_status === 'not_indexed'))
+      .map((o) => ({
+        source_tab: o.source_tab as string,
+        live_url: o.live_url as string,
+        status: o.indexed_status as 'indexed' | 'not_indexed',
+      }));
+
+    if (!items.length) continue;
+
+    const res = await writeIndexStatusToSheet(src.spreadsheet_id, src.header_row, mapping, items);
+    const now = new Date().toISOString();
+    if (res.ok) {
+      await db.from('sheet_sources').update({ last_writeback_at: now, last_writeback_error: null }).eq('id', src.id);
+    } else {
+      await db.from('sheet_sources').update({ last_writeback_at: now, last_writeback_error: res.error || 'Write-back failed' }).eq('id', src.id);
+    }
+  }
 }

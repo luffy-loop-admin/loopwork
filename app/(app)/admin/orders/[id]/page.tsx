@@ -13,7 +13,7 @@ export default async function EditOrderPage({ params }: { params: Promise<{ id: 
   let { data: order, error } = await supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url,alerted_at').eq('id', id).maybeSingle();
   if (error || !order) {
     const fb = await supabase.from('orders').select('id,domain,live_url,vendor_id,vendor_name,order_date,price_paid,currency,notes,order_status,indexed_status,pair,article_url').eq('id', id).maybeSingle();
-    order = fb.data;
+    order = fb.data as any;
   }
   if (!order) notFound();
   const { data: vendors } = await supabase.from('vendors').select('id,name').order('name');

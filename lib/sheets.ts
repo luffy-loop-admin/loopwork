@@ -39,6 +39,46 @@ function getClient(): JWT {
   return jwt;
 }
 
+let writeJwt: JWT | null = null;
+function getWriteClient(): JWT {
+  if (!writeJwt) {
+    const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const raw = process.env.GOOGLE_PRIVATE_KEY;
+    if (!email || !raw) {
+      throw new Error('Google service account is not configured (GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_PRIVATE_KEY).');
+    }
+    writeJwt = new JWT({ email, key: normalizeKey(raw), scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+  }
+  return writeJwt;
+}
+
+async function gwrite(url: string, body: unknown): Promise<any> {
+  const { token } = await getWriteClient().getAccessToken();
+  if (!token) throw new Error('Could not get a Google access token with write permissions.');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const j = await res.json();
+      detail = j?.error?.message ?? '';
+    } catch {
+      /* ignore */
+    }
+    if (res.status === 403) {
+      throw new Error(
+        `Google Sheets error 403: Permission denied. Share this sheet with ${serviceAccountEmail() || 'the service account email'} as Editor. ${detail}`.trim(),
+      );
+    }
+    throw new Error(`Google Sheets write error ${res.status}: ${detail}`.trim());
+  }
+  return res.json();
+}
+
 async function gfetch(url: string): Promise<any> {
   const { token } = await getClient().getAccessToken();
   if (!token) throw new Error('Could not get a Google access token. Check the service account key.');
@@ -96,7 +136,8 @@ export async function resolveTabs(spreadsheetId: string, spec: string | null): P
   return { tabs, missing };
 }
 
-export type SheetTable = { tab: string; headers: string[]; body: unknown[][] };
+import { type SheetTable, colIndex, buildWritebackRanges, colLetter, type WritebackCellUpdate } from '@/lib/sheets-types';
+export { type SheetTable, colIndex, buildWritebackRanges, colLetter, type WritebackCellUpdate };
 
 const q = (title: string) => `'${title.replace(/'/g, "''")}'`;
 
@@ -129,8 +170,72 @@ export async function fetchSheetHeaders(spreadsheetId: string, spec: string | nu
   return (rows[0] ?? []).map((c) => String(c ?? '').trim());
 }
 
-export function colIndex(headers: string[], name: string | undefined): number {
-  if (!name) return -1;
-  const n = name.trim().toLowerCase();
-  return headers.findIndex((h) => h.toLowerCase() === n);
+export type WritebackResult = {
+  ok: boolean;
+  written: number;
+  error?: string;
+};
+
+export type WritebackItem = {
+  source_tab: string;
+  live_url: string;
+  status: 'indexed' | 'not_indexed';
+};
+
+/**
+ * Writes indexing status ('Indexed' / 'Not indexed') back into the Google Sheet.
+ * Idempotent, safe, locates rows dynamically at write time, and uses batchUpdate.
+ */
+export async function writeIndexStatusToSheet(
+  spreadsheetId: string,
+  headerRow: number,
+  mapping: { live_url?: string; status?: string },
+  items: WritebackItem[]
+): Promise<WritebackResult> {
+  if (!spreadsheetId || !mapping.live_url || !mapping.status || !items.length) {
+    return { ok: true, written: 0 };
+  }
+
+  try {
+    const byTab = new Map<string, { live_url: string; status: 'indexed' | 'not_indexed' }[]>();
+    for (const it of items) {
+      if (!it.source_tab || (it.status !== 'indexed' && it.status !== 'not_indexed')) continue;
+      const list = byTab.get(it.source_tab) ?? [];
+      list.push(it);
+      byTab.set(it.source_tab, list);
+    }
+    if (!byTab.size) return { ok: true, written: 0 };
+
+    const tabsToFetch = Array.from(byTab.keys());
+    const { tables } = await fetchTables(spreadsheetId, tabsToFetch.join(','), headerRow);
+
+    const allUpdates: { range: string; values: string[][] }[] = [];
+    for (const table of tables) {
+      const tabItems = byTab.get(table.tab);
+      if (!tabItems || !tabItems.length) continue;
+      const cellUpdates = buildWritebackRanges(table.tab, table.headers, table.body, headerRow, mapping, tabItems);
+      for (const u of cellUpdates) {
+        allUpdates.push({
+          range: u.range,
+          values: [[u.value]],
+        });
+      }
+    }
+
+    if (!allUpdates.length) {
+      return { ok: true, written: 0 };
+    }
+
+    await gwrite(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
+      valueInputOption: 'USER_ENTERED',
+      data: allUpdates,
+    });
+
+    return { ok: true, written: allUpdates.length };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : 'Unknown write-back error';
+    return { ok: false, written: 0, error };
+  }
 }
+
+

@@ -65,7 +65,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     if (vendorFilter) fallback = fallback.eq('vendor_id', vendorFilter);
     if (q) fallback = fallback.or(`domain.ilike.%${q}%,vendor_name.ilike.%${q}%`);
     const fbRes = await fallback;
-    data = fbRes.data;
+    data = fbRes.data as any;
     count = fbRes.count;
   }
 

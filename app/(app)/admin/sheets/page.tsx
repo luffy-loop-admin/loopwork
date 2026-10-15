@@ -4,6 +4,7 @@ import { fmtDateTime } from '@/lib/format';
 import { KIND_LABEL, type SheetKind } from '@/lib/fields';
 import { serviceAccountEmail } from '@/lib/sheets';
 import ActionButton from '@/components/ActionButton';
+import SheetPreviewButton from '@/components/SheetPreviewButton';
 import { deleteSource, syncAllAction, syncSourceAction } from '@/app/actions/sheets';
 
 export const maxDuration = 300;
@@ -13,7 +14,7 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
   const supabase = await createClient();
   const { data } = await supabase
     .from('sheet_sources')
-    .select('id,kind,label,sheet_url,tab_name,active,last_synced_at,last_sync_status,last_sync_message,last_sync_rows,vendors(name)')
+    .select('id,kind,label,sheet_url,tab_name,order_tabs,active,last_synced_at,last_sync_status,last_sync_message,last_sync_rows,write_status_back,last_writeback_at,last_writeback_error,vendors(name)')
     .order('kind')
     .order('created_at');
   const sources = (data ?? []) as any[];
@@ -23,10 +24,11 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Google Sheets</h1>
         <div className="flex flex-wrap gap-2">
-          <Link href="/admin/sheets/new?kind=vendor" className="btn btn-ghost no-underline">Add vendor sheet</Link>
-          <Link href="/admin/sheets/new?kind=orders" className="btn btn-ghost no-underline">Add order history sheet</Link>
-          <Link href="/admin/sheets/new?kind=payments" className="btn btn-ghost no-underline">Add payments sheet</Link>
-          <ActionButton action={syncAllAction} label="Sync all now" className="btn btn-primary" />
+          <Link href="/admin/sheets/new?kind=ledger" className="btn btn-primary no-underline">+ Add vendor ledger</Link>
+          <Link href="/admin/sheets/new?kind=vendor" className="btn btn-ghost no-underline">Add vendor prices</Link>
+          <Link href="/admin/sheets/new?kind=orders" className="btn btn-ghost no-underline">Add order history</Link>
+          <Link href="/admin/sheets/new?kind=payments" className="btn btn-ghost no-underline">Add payments</Link>
+          <ActionButton action={syncAllAction} label="Sync all now" className="btn btn-secondary" />
         </div>
       </div>
 
@@ -37,7 +39,7 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
       )}
 
       <p className="text-sm text-muted">
-        Sheets sync automatically every 6 hours. Each sheet must be shared (Viewer) with <strong className="break-all text-ink">{serviceAccountEmail() || 'your service account email'}</strong>.
+        Sheets sync automatically every 6 hours. Share sheets (Viewer access, or Editor if writing status back) with <strong className="break-all text-ink">{serviceAccountEmail() || 'your service account email'}</strong>.
       </p>
 
       <div className="card overflow-x-auto">
@@ -54,34 +56,85 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
           <tbody>
             {sources.map((s) => {
               const vendor = Array.isArray(s.vendors) ? s.vendors[0] : s.vendors;
+              const title =
+                s.kind === 'ledger'
+                  ? (vendor?.name ? `${vendor.name} (Ledger)` : s.label || 'Vendor Ledger')
+                  : s.kind === 'vendor'
+                  ? (vendor?.name ?? 'Vendor')
+                  : (s.label || KIND_LABEL[s.kind as SheetKind]);
+
               return (
                 <tr key={s.id} className={s.active ? '' : 'bg-paper text-muted'}>
                   <td className="td">
-                    <div className="font-medium">{s.kind === 'vendor' ? vendor?.name ?? 'Vendor' : s.label || KIND_LABEL[s.kind as SheetKind]}</div>
-                    <a href={s.sheet_url} target="_blank" rel="noopener noreferrer" className="link text-xs">Open sheet{s.tab_name ? ` (${s.tab_name})` : ''}</a>
-                    {!s.active && <div className="text-xs">Paused</div>}
-                  </td>
-                  <td className="td">{KIND_LABEL[s.kind as SheetKind]}</td>
-                  <td className="td">{fmtDateTime(s.last_synced_at)}</td>
-                  <td className="td max-w-xs">
-                    {s.last_sync_status === 'error' ? <span className="text-bad">{s.last_sync_message}</span> : <span className="text-muted">{s.last_sync_message ?? 'Not synced yet'}</span>}
+                    <div className="font-medium">{title}</div>
+                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                      <a href={s.sheet_url} target="_blank" rel="noopener noreferrer" className="link text-xs">
+                        Open sheet
+                      </a>
+                      {s.order_tabs && s.order_tabs.length > 0 && (
+                        <span className="text-xs text-muted">
+                          ({s.order_tabs.length} tabs: {s.order_tabs.slice(0, 3).join(', ')}{s.order_tabs.length > 3 ? '…' : ''})
+                        </span>
+                      )}
+                      {!s.order_tabs && s.tab_name && (
+                        <span className="text-xs text-muted">({s.tab_name})</span>
+                      )}
+                      {s.write_status_back && (
+                        <span className="badge bg-good-soft text-good text-xs">✍️ Write-back ON</span>
+                      )}
+                    </div>
+                    {s.last_writeback_error && (
+                      <div className="text-xs text-bad mt-1 rounded bg-bad-soft/50 p-1.5">
+                        ⚠️ Write-back failed: {s.last_writeback_error}
+                        <div className="text-ink font-normal mt-0.5">Hint: Share this sheet with the service account as Editor.</div>
+                      </div>
+                    )}
+                    {!s.active && <div className="text-xs text-warn mt-1">Sync Paused</div>}
                   </td>
                   <td className="td">
-                    <div className="flex flex-wrap items-start gap-2">
+                    <span className={`badge ${s.kind === 'ledger' ? 'bg-accent-soft text-accent font-semibold' : 'bg-paper text-ink'}`}>
+                      {KIND_LABEL[s.kind as SheetKind] || s.kind}
+                    </span>
+                  </td>
+                  <td className="td text-xs">{fmtDateTime(s.last_synced_at)}</td>
+                  <td className="td max-w-xs text-xs">
+                    {s.last_sync_status === 'error' ? (
+                      <span className="text-bad">{s.last_sync_message}</span>
+                    ) : (
+                      <span className="text-muted">{s.last_sync_message ?? 'Not synced yet'}</span>
+                    )}
+                  </td>
+                  <td className="td">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {s.kind === 'ledger' && <SheetPreviewButton sourceId={s.id} />}
                       <ActionButton action={syncSourceAction.bind(null, s.id)} label="Sync now" />
                       <Link href={`/admin/sheets/${s.id}`} className="btn btn-ghost btn-sm no-underline">Edit</Link>
                       <ActionButton
                         action={deleteSource.bind(null, s.id)}
                         label="Remove"
                         className="btn btn-danger btn-sm"
-                        confirm={s.kind === 'vendor' ? 'Remove this sheet and all the sites imported from it?' : s.kind === 'payments' ? 'Remove this sheet link and the payments imported from it?' : 'Remove this sheet link? Orders already imported are kept.'}
+                        confirm={
+                          s.kind === 'ledger'
+                            ? 'Remove this ledger sheet? Links and payments from this sheet will be removed.'
+                            : s.kind === 'vendor'
+                            ? 'Remove this sheet and all the sites imported from it?'
+                            : s.kind === 'payments'
+                            ? 'Remove this sheet link and the payments imported from it?'
+                            : 'Remove this sheet link? Orders already imported are kept.'
+                        }
                       />
                     </div>
                   </td>
                 </tr>
               );
             })}
-            {sources.length === 0 && <tr><td className="td text-muted" colSpan={5}>No sheets yet. Add a vendor sheet to get started.</td></tr>}
+            {sources.length === 0 && (
+              <tr>
+                <td className="td text-muted" colSpan={5}>
+                  No sheets yet. Click &quot;+ Add vendor ledger&quot; or &quot;Add vendor prices&quot; to get started.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
