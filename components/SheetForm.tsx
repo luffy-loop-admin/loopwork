@@ -4,7 +4,7 @@ import ActionForm from './ActionForm';
 import { fieldsFor, LEDGER_ORDER_FIELDS, LEDGER_PAYMENT_FIELDS, type SheetKind } from '@/lib/fields';
 import { previewLedgerAction } from '@/app/actions/sheets';
 import LedgerPreviewModal from './LedgerPreviewModal';
-import type { ParsedLedger } from '@/lib/ledger';
+import { inferMonthFromTabName, type ParsedLedger } from '@/lib/ledger';
 import type { ActionResult } from '@/lib/types';
 
 type Initial = {
@@ -32,8 +32,6 @@ type Props = {
   action: (formData: FormData) => Promise<ActionResult | void>;
   initial?: Initial;
 };
-
-const MONTH_REGEX = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
 
 export default function SheetForm({ kind, vendors, serviceEmail, action, initial = {} }: Props) {
   const isLedger = kind === 'ledger';
@@ -79,7 +77,7 @@ export default function SheetForm({ kind, vendors, serviceEmail, action, initial
         if (pTab) setSelectedPaymentTab(pTab);
 
         // Pre-select month tabs for orders
-        const monthTabs = list.filter((t) => t !== pTab && MONTH_REGEX.test(t));
+        const monthTabs = list.filter((t) => t !== pTab && inferMonthFromTabName(t) !== null);
         setSelectedOrderTabs(monthTabs.length ? monthTabs : list);
       } else if (kind === 'vendor') {
         if (!selectedOrderTabs.length) {

@@ -252,3 +252,68 @@ This will add the new ledger columns and update RLS policies safely and idempote
 3. Check indexing for an order on the Orders page.
 4. Verify that the Google Sheet cell in the Status column on that link's row is updated to `Indexed` or `Not indexed`.
 
+---
+
+## 6. 🛠️ Update 6: Fix "All Listings" Months & Payments Data (Round 2 Follow-up)
+
+### 🌟 Root Cause Analysis & Fixes
+
+#### Problem 1: Clicking a Vendor in "All Listings" Shows No Months
+1. **PostgREST 1000-Row Query Cap (Real Root Cause):**
+   - *Problem:* Supabase/PostgREST automatically caps row returns at 1000. Collecting months in JavaScript via `.limit(2000)` was cut off at 1000 rows. Vendors with extensive link histories silently lost months.
+   - *Fix:* Created the `public.vendor_months` view with `security_invoker = true`. The database aggregates links and total PKR per month directly in PostgreSQL with no row limits.
+2. **Missing Inferred Month on Date-Empty Rows (Real Root Cause):**
+   - *Problem:* Many guest posts in a month tab have an empty Date cell (e.g. unpaid links at the top). Without `order_month`, these rows had no month assigned.
+   - *Fix:* Updated `parseLedgerOrders`, `syncVendorSheet`, and `syncOrdersSheet` to unconditionally assign `order_month` (`YYYY-MM-01`) based on the tab's inferred month. Rows with an empty date now inherit their tab's month automatically.
+3. **Month Regex Failed on Underscores & Numbers (Real Root Cause):**
+   - *Problem:* Previous regex used standard `\b` word boundaries. In JavaScript, `\w` includes underscores `_` and digits `0-9`. Tab names like `August_Links`, `August2026`, `Aug2026`, or `Sept_Links` failed word boundaries and were skipped as month tabs.
+   - *Fix:* Replaced `\b` with non-letter boundaries `(?:^|[^a-z])(...)`. Now matches all variations (`August Links`, `August_Links`, `August2026`, `Aug 26`, `Aug_24`, `08-August`, `July`, `Sept`, `October`).
+4. **Month Dropdown Formatted Label (Real Improvement):**
+   - *Problem:* The dropdown only showed short text like "Aug 2026" without link counts or totals.
+   - *Fix:* Formatted every month option as required: `August 2026 (14 links, PKR 52,500)`.
+5. **Vendor Tab Switching Filter Carryover (Real Root Cause):**
+   - *Problem:* Selecting a new vendor tab carried over previous month/week query parameters that did not exist for the new vendor.
+   - *Fix:* Vendor tab links now explicitly reset `month` and `week` filters.
+6. **Diagnostics Panel Added (Feature Added):**
+   - Added a collapsible **"📊 Tab sync diagnostics"** panel on each ledger row in `/admin/sheets` showing tab name, detected month/year, link counts, total PKR, and skipped row reasons.
+
+#### Problem 2: Wrong Payments & Old Payment History Cleanup
+1. **Rogue Payment Scraping in `syncVendorSheet` (Real Root Cause):**
+   - *Problem:* `syncVendorSheet` (for price list sheets) contained code that treated any line matching `/pay|paid|payment|remaining/i` as a payment. Summary rows like `"Remaining 1500 paid"` or `"20000 By Hamayun Saleem"` were being imported as payments into the database.
+   - *Fix:* Completely removed rogue payment extraction from `syncVendorSheet`. Payments are now imported exclusively from the `Payment History` tab of ledger sources.
+2. **Payment Column Header Detection Exact Match (Real Root Cause):**
+   - *Problem:* The amount regex was strict (`/^(?:amount|paid)$/i`) and failed on headers like `Amount (PKR)`, `Paid Amount`, `Payment`, etc., while balance columns like `Remaining` needed strict exclusion.
+   - *Fix:* Added resilient auto-detection matching `Amount`, `Amount (PKR)`, `Paid Amount`, `Payment`, while strictly excluding `/remain|balance|total|due|left/i`.
+3. **Old Sheet Payments Remaining in Database (Real Root Cause):**
+   - *Problem:* Older syncs or obsolete `payments` sheet sources created duplicate or orphaned rows that were never cleaned up.
+   - *Fix:* Created `ResetPaymentsModal` and `resetSyncedPaymentsAction` on the Admin Payments page. With one click, it deletes all sheet-imported payments (`source_id is not null`) while preserving manual payments, and immediately re-syncs all ledger sources cleanly from their `Payment History` tabs.
+4. **SQL Diagnostics & Cleanup Scripts Created:**
+   - Created `supabase/diagnostics.sql` with read-only inspection queries.
+   - Created `supabase/cleanup_payments.sql` to wipe sheet-imported payments and backfill `order_month`.
+
+---
+
+### 📋 Exact SQL to Run in Order
+
+In the [Supabase Dashboard](https://supabase.com/dashboard) -> **SQL Editor**:
+
+#### Step 1: Run Diagnostics (Read-Only)
+Run `supabase/diagnostics.sql` to inspect current payment origins, duplicate payments, and unassigned payments.
+
+#### Step 2: Run Migration 0005
+Run `supabase/migrations/0005_vendor_ledger.sql`:
+- Creates `public.vendor_months` view with `security_invoker = true`.
+- Adds `sync_diagnostics` column to `sheet_sources`.
+- Backfills `order_month` on existing orders.
+- Grants permissions to `authenticated`.
+
+#### Step 3: Run Payments Cleanup
+Run `supabase/cleanup_payments.sql`:
+- Deletes all sheet-imported payments (`delete from public.payments where source_id is not null;`).
+- Manually entered payments are preserved.
+
+#### Step 4: Re-Sync All
+In the portal, navigate to the Dashboard or Admin Sheets and click **"Sync all now"** (or use the new **"⚠️ Reset synced payments"** button on the Payments page).
+All ledger sheets will re-import cleanly with 0 duplicates!
+
+

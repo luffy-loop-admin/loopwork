@@ -14,7 +14,7 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
   const supabase = await createClient();
   const { data } = await supabase
     .from('sheet_sources')
-    .select('id,kind,label,sheet_url,tab_name,order_tabs,active,last_synced_at,last_sync_status,last_sync_message,last_sync_rows,write_status_back,last_writeback_at,last_writeback_error,vendors(name)')
+    .select('id,kind,label,sheet_url,spreadsheet_id,vendor_id,tab_name,order_tabs,payment_tab,active,last_synced_at,last_sync_status,last_sync_message,last_sync_rows,write_status_back,last_writeback_at,last_writeback_error,sync_diagnostics,vendors(name)')
     .order('kind')
     .order('created_at');
   const sources = (data ?? []) as any[];
@@ -54,7 +54,19 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
             </tr>
           </thead>
           <tbody>
-            {sources.map((s) => {
+            {(() => {
+              const sheetCounts = new Map<string, number>();
+              const vendorLedgers = new Set<string>();
+              for (const src of sources) {
+                if (src.spreadsheet_id) {
+                  sheetCounts.set(src.spreadsheet_id, (sheetCounts.get(src.spreadsheet_id) ?? 0) + 1);
+                }
+                if (src.kind === 'ledger' && src.vendor_id) {
+                  vendorLedgers.add(src.vendor_id);
+                }
+              }
+
+              return sources.map((s) => {
               const vendor = Array.isArray(s.vendors) ? s.vendors[0] : s.vendors;
               const title =
                 s.kind === 'ledger'
@@ -89,7 +101,81 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
                         <div className="text-ink font-normal mt-0.5">Hint: Share this sheet with the service account as Editor.</div>
                       </div>
                     )}
+                    {sheetCounts.get(s.spreadsheet_id) && sheetCounts.get(s.spreadsheet_id)! > 1 && (
+                      <div className="text-xs text-warn mt-1 rounded bg-warn-soft/50 p-1.5">
+                        ⚠️ Warning: Another sheet source is linked to this same Google Spreadsheet.
+                      </div>
+                    )}
+                    {s.kind === 'payments' && s.vendor_id && vendorLedgers.has(s.vendor_id) && (
+                      <div className="text-xs text-warn mt-1 rounded bg-warn-soft/50 p-1.5">
+                        ⚠️ Warning: A vendor ledger is already active for this vendor. This standalone payments sheet may count payments twice.
+                      </div>
+                    )}
                     {!s.active && <div className="text-xs text-warn mt-1">Sync Paused</div>}
+
+                    {/* Tab sync diagnostics panel for ledger sheets */}
+                    {s.kind === 'ledger' && (
+                      <details className="mt-2 text-xs border border-line/70 rounded-md bg-paper p-2">
+                        <summary className="cursor-pointer font-medium text-accent hover:underline flex items-center gap-1 select-none">
+                          <span>📊 Tab sync diagnostics</span>
+                          {s.sync_diagnostics?.tabs?.length ? (
+                            <span className="text-muted font-normal">({s.sync_diagnostics.tabs.length} tabs analyzed)</span>
+                          ) : null}
+                        </summary>
+                        <div className="mt-2 space-y-2 border-t border-line/60 pt-2 overflow-x-auto">
+                          {s.sync_diagnostics?.tabs?.length ? (
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="border-b border-line text-muted">
+                                  <th className="py-1 pr-2 font-medium">Tab name</th>
+                                  <th className="py-1 pr-2 font-medium">Type / Month</th>
+                                  <th className="py-1 pr-2 font-medium">Count (PKR)</th>
+                                  <th className="py-1 font-medium">Details / Skipped</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-line/40">
+                                {s.sync_diagnostics.tabs.map((td: any, idx: number) => {
+                                  const isOrder = td.type === 'order';
+                                  const isPayment = td.type === 'payment';
+                                  return (
+                                    <tr key={`${td.tab}-${idx}`} className={td.type === 'ignored' ? 'opacity-60' : ''}>
+                                      <td className="py-1 pr-2 font-mono font-medium">{td.tab}</td>
+                                      <td className="py-1 pr-2 whitespace-nowrap">
+                                        {isOrder ? (
+                                          <span className="text-good font-medium">📅 {td.monthYear || 'Month tab'}</span>
+                                        ) : isPayment ? (
+                                          <span className="text-accent font-medium">💳 Payment History</span>
+                                        ) : (
+                                          <span className="text-muted">Ignored</span>
+                                        )}
+                                      </td>
+                                      <td className="py-1 pr-2 whitespace-nowrap">
+                                        {isOrder ? (
+                                          <span><strong>{td.linksCount ?? 0}</strong> links (PKR {Math.round(td.totalPKR ?? 0).toLocaleString()})</span>
+                                        ) : isPayment ? (
+                                          <span><strong>{td.paymentCount ?? 0}</strong> payments (PKR {Math.round(td.totalPaidPKR ?? 0).toLocaleString()})</span>
+                                        ) : '-'}
+                                      </td>
+                                      <td className="py-1 text-muted">
+                                        {td.skippedNoLink > 0 && <span className="text-warn">{td.skippedNoLink} skipped (no live link). </span>}
+                                        {td.noPriceCount > 0 && <span>{td.noPriceCount} no price. </span>}
+                                        {td.duplicateCount > 0 && <span>{td.duplicateCount} duplicate. </span>}
+                                        {td.reason && <span>{td.reason}</span>}
+                                        {!td.skippedNoLink && !td.noPriceCount && !td.duplicateCount && !td.reason && <span className="text-good">✓ All rows valid</span>}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          ) : (
+                            <p className="text-muted py-1">
+                              No diagnostics recorded yet. Click <strong>&quot;Sync now&quot;</strong> or <strong>&quot;Preview&quot;</strong> to analyze all tabs.
+                            </p>
+                          )}
+                        </div>
+                      </details>
+                    )}
                   </td>
                   <td className="td">
                     <span className={`badge ${s.kind === 'ledger' ? 'bg-accent-soft text-accent font-semibold' : 'bg-paper text-ink'}`}>
@@ -127,7 +213,8 @@ export default async function SheetsPage({ searchParams }: { searchParams: Promi
                   </td>
                 </tr>
               );
-            })}
+            });
+          })()}
             {sources.length === 0 && (
               <tr>
                 <td className="td text-muted" colSpan={5}>

@@ -4,6 +4,7 @@ import { fmtDate, money } from '@/lib/format';
 import ActionForm from '@/components/ActionForm';
 import ActionButton from '@/components/ActionButton';
 import Pager from '@/components/Pager';
+import ResetPaymentsModal from '@/components/ResetPaymentsModal';
 import { deletePayment, savePayment } from '@/app/actions/payments';
 
 const PAGE_SIZE = 50;
@@ -30,10 +31,11 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   if (vendorFilter) query = query.eq('vendor_id', vendorFilter);
 
-  const [{ data, count }, vendorsRes, balRes] = await Promise.all([
+  const [{ data, count }, vendorsRes, balRes, allPaymentsRes] = await Promise.all([
     query,
     supabase.from('vendors').select('id,name').order('name'),
     supabase.from('vendor_balance').select('vendor_name,currency,orders_count,payments_count,ordered_total,paid_total,balance').order('vendor_name'),
+    supabase.from('payments').select('source_id,amount'),
   ]);
   const rows = (data ?? []) as any[];
   const vendors = (vendorsRes.data ?? []) as { id: string; name: string }[];
@@ -43,13 +45,34 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     const hit = balMap.get(v.name.toLowerCase());
     return hit ?? { vendor_name: v.name, currency: 'PKR', orders_count: 0, payments_count: 0, ordered_total: 0, paid_total: 0, balance: 0 };
   });
+
+  let syncedCount = 0, syncedPKR = 0, manualCount = 0, manualPKR = 0;
+  for (const p of (allPaymentsRes.data ?? []) as any[]) {
+    const amt = Number(p.amount) || 0;
+    if (p.source_id) {
+      syncedCount++;
+      syncedPKR += amt;
+    } else {
+      manualCount++;
+      manualPKR += amt;
+    }
+  }
+
   const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Payments</h1>
-        <Link href="/admin/sheets/new?kind=payments" className="btn btn-ghost no-underline">Import from a payments sheet</Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <ResetPaymentsModal
+            syncedCount={syncedCount}
+            syncedPKR={syncedPKR}
+            manualCount={manualCount}
+            manualPKR={manualPKR}
+          />
+          <Link href="/admin/sheets/new?kind=payments" className="btn btn-ghost no-underline">Import from a payments sheet</Link>
+        </div>
       </div>
 
       <details className="card p-4 sm:p-5" open>

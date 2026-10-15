@@ -152,6 +152,7 @@ server-only: ^0.0.1
 │   ├── OrderFields.tsx
 │   ├── Pager.tsx
 │   ├── PwaRegister.tsx
+│   ├── ResetPaymentsModal.tsx
 │   ├── SearchBox.tsx
 │   ├── SheetForm.tsx
 │   ├── SheetPreviewButton.tsx
@@ -191,6 +192,8 @@ server-only: ^0.0.1
 │   ├── seed-admin.mjs
 │   └── test-ledger.mjs
 ├── supabase
+│   ├── cleanup_payments.sql
+│   ├── diagnostics.sql
 │   └── migrations
 │       ├── 0001_init.sql
 │       ├── 0002_pkr_payments_tabs.sql
@@ -201,6 +204,12 @@ server-only: ^0.0.1
 ├── tsconfig.json
 └── vercel.json
 ```
+
+## 🛠️ Database Scripts & Maintenance
+
+- `supabase/migrations/0005_vendor_ledger.sql` — Latest migration creating `vendor_months` view with `security_invoker = true`, `sheet_sources.sync_diagnostics`, and backfilling `orders.order_month`.
+- `supabase/diagnostics.sql` — Read-only diagnostic queries to inspect payment origins, unassigned payments, duplicates, vendor balance reconciliation, and tab month inference status.
+- `supabase/cleanup_payments.sql` — Safe cleanup script to clear sheet-imported payments (`source_id is not null`) prior to a fresh re-sync while preserving manual payments.
 
 ## ⚡ Available Scripts
 

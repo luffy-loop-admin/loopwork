@@ -57,7 +57,7 @@ export const LEDGER_ORDER_FIELDS: FieldDef[] = [
 
 export const LEDGER_PAYMENT_FIELDS: FieldDef[] = [
   { key: 'date', label: 'Payment date', required: true, hint: 'Date of payment.', guess: /^date$|paid\s*date|payment\s*date/i },
-  { key: 'amount', label: 'Amount (PKR)', required: true, hint: 'Never maps Remaining/Balance columns.', guess: /^(?:amount|paid|amount\s*paid)$/i },
+  { key: 'amount', label: 'Amount (PKR)', required: true, hint: 'Never maps Remaining/Balance columns.', guess: /^(?:amount|paid|payment|amount\s*paid|paid\s*amount|total\s*paid)(?:\s*\(?pkr\)?)?$/i },
   { key: 'time', label: 'Payment time', hint: 'Optional.', guess: /time/i },
   { key: 'method', label: 'Payment method', hint: 'Optional (e.g. Bank, EasyPaisa, Cash).', guess: /method|mode|via|channel|account/i },
   { key: 'reference', label: 'Reference / transaction ID', hint: 'Optional.', guess: /ref|txn|trx|transaction|receipt/i },

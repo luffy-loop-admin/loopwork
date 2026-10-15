@@ -130,22 +130,83 @@ export default async function ListingsPage({
     const { data: totalsData } = await totalsQuery;
     const filteredTotalPKR = (totalsData ?? []).reduce((sum, r: any) => sum + (Number(r.price_paid) || 0), 0);
 
-    // Collect available months and tabs for filters
-    let metaQuery = supabase.from('orders').select('order_date,order_month,source_tab').not('source_tab', 'is', null);
-    if (vendorId) metaQuery = metaQuery.eq('vendor_id', vendorId);
-    const { data: metaData } = await metaQuery.limit(2000);
+    // Query months from public.vendor_months view
+    type MonthRow = {
+      monthKey: string; // YYYY-MM
+      label: string; // e.g. "August 2026 (14 links, PKR 52,500)"
+      linksCount: number;
+      totalPKR: number;
+    };
 
-    const availableMonths = new Set<string>();
-    const availableTabs = new Set<string>();
-    for (const r of (metaData ?? []) as any[]) {
-      if (r.source_tab) availableTabs.add(r.source_tab);
-      const d = r.order_date || r.order_month;
-      if (d && typeof d === 'string' && d.length >= 7) {
-        availableMonths.add(d.slice(0, 7));
+    let monthsList: MonthRow[] = [];
+    try {
+      let vMonthQuery = supabase.from('vendor_months').select('vendor_id,month,links_count,total_price');
+      if (vendorId) vMonthQuery = vMonthQuery.eq('vendor_id', vendorId);
+      const { data: vMonthData, error: vmErr } = await vMonthQuery;
+      if (!vmErr && vMonthData && vMonthData.length > 0) {
+        const grouped = new Map<string, { linksCount: number; totalPKR: number }>();
+        for (const row of vMonthData as any[]) {
+          if (!row.month) continue;
+          const key = String(row.month).slice(0, 7);
+          const cur = grouped.get(key) ?? { linksCount: 0, totalPKR: 0 };
+          cur.linksCount += Number(row.links_count) || 0;
+          cur.totalPKR += Number(row.total_price) || 0;
+          grouped.set(key, cur);
+        }
+        for (const [key, val] of grouped.entries()) {
+          const [y, m] = key.split('-').map(Number);
+          const d = new Date(Date.UTC(y, m - 1, 1));
+          const monthTitle = d.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+          monthsList.push({
+            monthKey: key,
+            label: `${monthTitle} (${val.linksCount} links, PKR ${Math.round(val.totalPKR).toLocaleString()})`,
+            linksCount: val.linksCount,
+            totalPKR: val.totalPKR,
+          });
+        }
+        monthsList.sort((a, b) => b.monthKey.localeCompare(a.monthKey));
       }
+    } catch {
+      // Fallback if view doesn't exist yet
     }
-    const sortedMonths = Array.from(availableMonths).sort().reverse();
-    const sortedTabs = Array.from(availableTabs).sort();
+
+    // Defensive fallback: if vendor_months view returned nothing, query orders table directly
+    if (monthsList.length === 0) {
+      let fallbackQuery = supabase
+        .from('orders')
+        .select('order_date,order_month,price_paid')
+        .not('vendor_id', 'is', null);
+      if (vendorId) fallbackQuery = fallbackQuery.eq('vendor_id', vendorId);
+      const { data: fbOrders } = await fallbackQuery.limit(5000);
+      const grouped = new Map<string, { linksCount: number; totalPKR: number }>();
+      for (const r of (fbOrders ?? []) as any[]) {
+        const d = r.order_date || r.order_month;
+        if (!d || typeof d !== 'string' || d.length < 7) continue;
+        const key = d.slice(0, 7);
+        const cur = grouped.get(key) ?? { linksCount: 0, totalPKR: 0 };
+        cur.linksCount++;
+        cur.totalPKR += Number(r.price_paid) || 0;
+        grouped.set(key, cur);
+      }
+      for (const [key, val] of grouped.entries()) {
+        const [y, m] = key.split('-').map(Number);
+        const d = new Date(Date.UTC(y, m - 1, 1));
+        const monthTitle = d.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+        monthsList.push({
+          monthKey: key,
+          label: `${monthTitle} (${val.linksCount} links, PKR ${Math.round(val.totalPKR).toLocaleString()})`,
+          linksCount: val.linksCount,
+          totalPKR: val.totalPKR,
+        });
+      }
+      monthsList.sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+    }
+
+    // Tab filter options (from orders with source_tab)
+    let tabsQuery = supabase.from('orders').select('source_tab').not('source_tab', 'is', null);
+    if (vendorId) tabsQuery = tabsQuery.eq('vendor_id', vendorId);
+    const { data: tabsData } = await tabsQuery.limit(2000);
+    const sortedTabs = Array.from(new Set((tabsData ?? []).map((r: any) => r.source_tab).filter(Boolean))).sort() as string[];
 
     // Weeks inside selected month
     const weeksInMonth: { start: string; label: string }[] = [];
@@ -245,15 +306,11 @@ export default async function ListingsPage({
           />
 
           {/* Month Dropdown */}
-          <select name="month" defaultValue={monthFilter} className="input input-sm max-w-[10rem]">
+          <select name="month" defaultValue={monthFilter} className="input input-sm max-w-[18rem]">
             <option value="">All months</option>
-            {sortedMonths.map((m) => {
-              const [y, mon] = m.split('-').map(Number);
-              const label = new Date(y, mon - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
-              return (
-                <option key={m} value={m}>{label}</option>
-              );
-            })}
+            {monthsList.map((m) => (
+              <option key={m.monthKey} value={m.monthKey}>{m.label}</option>
+            ))}
           </select>
 
           {/* Week Dropdown */}

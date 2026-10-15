@@ -4,7 +4,7 @@ import { CURRENCY } from '@/lib/config';
 import { cleanUrl, normalizeDomain } from '@/lib/domain';
 import { cellText, parseCurrency, parseDate, parseIndexStatus, parseIntSafe, parseMoney, parseTime } from '@/lib/parse';
 import { colIndex, fetchSheetTabs, fetchTables, resolveTabs, type SheetTable } from '@/lib/sheets';
-import { inferMonthFromTabName, parseLedgerOrders, parseLedgerPayments, previewLedger, type ParsedLedger } from '@/lib/ledger';
+import { inferMonthFromTabName, parseLedgerOrders, parseLedgerPayments, previewLedger, type ParsedLedger, type TabDiagnostic } from '@/lib/ledger';
 
 type Db = ReturnType<typeof createAdminClient>;
 type Source = {
@@ -116,15 +116,11 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
     vendor_name: string | null; order_date: string | null; price_paid: number | null; currency: string; notes: string | null;
     sheet_status: 'indexed' | 'not_indexed' | null; order_status: 'live' | 'ordered'; pair: string | null; article_url: string | null;
     payment_status?: string | null;
-  };
-  type PayRec = {
-    source_id: string; source_key: string; vendor_id: string | null; vendor_name: string | null;
-    amount: number; currency: string; paid_date: string; method: string; notes: string | null;
+    order_month?: string | null;
   };
 
   const sitesMap = new Map<string, SiteRec>();
   const ordersMap = new Map<string, OrderRec>();
-  const paymentsMap = new Map<string, PayRec>();
   const usedTabs: string[] = [];
   const skippedTabs: string[] = [];
   let skipped = 0;
@@ -170,28 +166,7 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
       const paymentDate = parseDate(cell(r, idx.payment_date)) ?? date;
 
       if (!domain) {
-        // Detect payment lines at the bottom of the sheet (e.g. "30,000 Only Index links Payment", "700 Remaining")
-        const rowText = r.map((c) => String(c ?? '')).join(' ');
-        const isPaymentRow = /pay|paid|payment|remaining|advance|sent|transferred|deposit/i.test(rowText);
-        const amount = price ?? parseMoney(cell(r, idx.live)) ?? parseMoney(cell(r, idx.site));
-        if (amount && amount > 0 && isPaymentRow && src.vendor_id) {
-          const paidDate = date ?? paymentDate ?? parseDate(rowText) ?? startedAt.slice(0, 10);
-          const pNote = doc ?? cellText(cell(r, idx.status)) ?? cellText(cell(r, idx.notes)) ?? rowText.slice(0, 150);
-          const pKey = `p:${src.id}|${amount}|${paidDate}|${pNote?.slice(0, 20) ?? ''}`;
-          paymentsMap.set(pKey, {
-            source_id: src.id,
-            source_key: pKey,
-            vendor_id: src.vendor_id,
-            vendor_name: vendorName,
-            amount,
-            currency,
-            paid_date: paidDate,
-            method: 'Sheet import',
-            notes: pNote,
-          });
-        } else {
-          skipped++;
-        }
+        skipped++;
         continue;
       }
 
@@ -229,6 +204,10 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
             ? `a:${doc.toLowerCase()}`
             : `d:${domain}|${date ?? ''}|${(vendorName ?? '').toLowerCase()}#${rowCounter}`);
 
+        const inferredMonth = inferMonthFromTabName(t.tab);
+        const orderDate = date ?? paymentDate;
+        const orderMonth = inferredMonth ? inferredMonth.monthStart : (orderDate ? `${orderDate.slice(0, 7)}-01` : null);
+
         ordersMap.set(key, {
           source_id: src.id,
           source_key: key,
@@ -237,7 +216,8 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
           live_url: live,
           vendor_id: vendorId ?? src.vendor_id,
           vendor_name: vendorName,
-          order_date: date ?? paymentDate,
+          order_date: orderDate,
+          order_month: orderMonth,
           price_paid: price, // strictly the price written in front of the site in this row!
           currency,
           notes,
@@ -254,8 +234,8 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
   if (!usedTabs.length) {
     throw new Error(`The website or live link column was not found in header row ${src.header_row} of any tab. Open the sheet settings and map the columns again.`);
   }
-  if (sitesMap.size === 0 && ordersMap.size === 0 && paymentsMap.size === 0) {
-    throw new Error('No valid website, order, or payment rows were found. Nothing was changed. Check the column mapping and header row.');
+  if (sitesMap.size === 0 && ordersMap.size === 0) {
+    throw new Error('No valid website or order rows were found. Nothing was changed. Check the column mapping and header row.');
   }
 
   // 1. Save vendor sites
@@ -286,15 +266,6 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
     }
   }
 
-  // 3. Save auto-detected payments from sheet bottom lines
-  if (paymentsMap.size > 0) {
-    const payRecords = Array.from(paymentsMap.values());
-    for (let i = 0; i < payRecords.length; i += CHUNK) {
-      const { error } = await db.from('payments').upsert(payRecords.slice(i, i + CHUNK), { onConflict: 'source_id,source_key' });
-      if (error) console.error('Error importing sheet payments:', error.message);
-    }
-  }
-
   let label = 'sites synced';
   if (ordersMap.size > 0 && sitesMap.size > 0) {
     label = `${sitesMap.size} sites and ${ordersMap.size} orders synced`;
@@ -303,10 +274,7 @@ async function syncVendorSheet(db: Db, src: Source, tables: SheetTable[], missin
   } else {
     label = `${sitesMap.size} sites synced`;
   }
-  if (paymentsMap.size > 0) {
-    label += `, ${paymentsMap.size} payments imported`;
-  }
-  const totalCount = sitesMap.size + ordersMap.size + paymentsMap.size;
+  const totalCount = sitesMap.size + ordersMap.size;
   return { ok: true, rows: totalCount, message: summary(label, totalCount, usedTabs, skippedTabs, skipped, missing) };
 }
 
@@ -320,6 +288,7 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
     vendor_name: string | null; order_date: string | null; price_paid: number | null; currency: string; notes: string | null;
     sheet_status: 'indexed' | 'not_indexed' | null; order_status: 'live' | 'ordered'; pair: string | null; article_url: string | null;
     payment_status?: string | null;
+    order_month?: string | null;
   };
   const map = new Map<string, Rec>();
   const usedTabs: string[] = [];
@@ -351,10 +320,12 @@ async function syncOrdersSheet(db: Db, src: Source, tables: SheetTable[], missin
       const priceRaw = cell(r, idx.price);
       const st = parseIndexStatus(cell(r, idx.status));
       const key = live ? `u:${live.toLowerCase()}` : `d:${domain}|${date ?? ''}|${(vendorName ?? '').toLowerCase()}`;
+      const inferredMonth = inferMonthFromTabName(t.tab);
+      const orderMonth = inferredMonth ? inferredMonth.monthStart : (date ? `${date.slice(0, 7)}-01` : null);
       map.set(key, {
         source_id: src.id, source_key: key, source_tab: t.tab, domain, live_url: live,
         vendor_id: vendorName ? vendorByName.get(vendorName.toLowerCase()) ?? null : null,
-        vendor_name: vendorName, order_date: date, price_paid: parseMoney(priceRaw),
+        vendor_name: vendorName, order_date: date, order_month: orderMonth, price_paid: parseMoney(priceRaw),
         currency: parseCurrency(idx.currency >= 0 && cell(r, idx.currency) ? cell(r, idx.currency) : priceRaw, src.default_currency || CURRENCY),
         notes: cellText(cell(r, idx.notes)),
         sheet_status: st === 'indexed' || st === 'not_indexed' ? st : null,
@@ -577,14 +548,43 @@ async function syncLedgerSheet(db: Db, src: Source, startedAt: string): Promise<
       const { error } = await db.from('payments').upsert(payRecords.slice(i, i + CHUNK), { onConflict: 'source_id,source_key' });
       if (error) console.error('Error importing ledger payments:', error.message);
     }
-
-    const { error: delPErr } = await db.from('payments').delete().eq('source_id', src.id).lt('updated_at', startedAt);
-    if (delPErr) console.error('Error cleaning removed ledger payments:', delPErr.message);
   }
 
-  // Update order_tabs in DB if new tabs were discovered
-  if (tabsUpdated) {
-    await db.from('sheet_sources').update({ order_tabs: orderTabs }).eq('id', src.id);
+  // Always delete payments for this source that disappeared from the sheet
+  const { error: delPErr } = await db.from('payments').delete().eq('source_id', src.id).lt('updated_at', startedAt);
+  if (delPErr) console.error('Error cleaning removed ledger payments:', delPErr.message);
+
+  // Build per-tab diagnostics
+  const tabDiagnostics: TabDiagnostic[] = [...parsedOrders.tabDiagnostics];
+  if (parsedPayments.diagnostic) {
+    tabDiagnostics.push(parsedPayments.diagnostic);
+  }
+  const processedTabs = new Set([
+    ...parsedOrders.usedTabs,
+    ...(paymentTable ? [paymentTable.tab] : []),
+  ]);
+  for (const t of allTabs) {
+    if (!processedTabs.has(t)) {
+      tabDiagnostics.push({
+        tab: t,
+        type: 'ignored',
+        reason: 'Ignored: name does not contain a recognized month name',
+      });
+    }
+  }
+
+  // Update order_tabs and sync_diagnostics in DB
+  try {
+    const updatePayload: Record<string, any> = {
+      sync_diagnostics: {
+        synced_at: startedAt,
+        tabs: tabDiagnostics,
+      },
+    };
+    if (tabsUpdated) updatePayload.order_tabs = orderTabs;
+    await db.from('sheet_sources').update(updatePayload).eq('id', src.id);
+  } catch (diagErr) {
+    console.warn('Could not save sync_diagnostics on source:', diagErr);
   }
 
   const message = `${parsedOrders.orders.length} links (PKR ${Math.round(parsedOrders.totalOrderedPKR).toLocaleString()}) from ${parsedOrders.usedTabs.length} tabs; ${parsedOrders.skippedNoLink} rows skipped (no live link); ${parsedPayments.payments.length} payments (PKR ${Math.round(parsedPayments.totalPaidPKR).toLocaleString()}).`;
@@ -641,6 +641,7 @@ export async function previewLedgerSource(sourceId: string): Promise<ParsedLedge
   return previewLedger(orderTables, paymentTable, src.mapping || {}, src.payment_mapping || {}, {
     requireLiveLink: src.require_live_link ?? true,
     defaultCurrency: src.default_currency || 'PKR',
+    allSheetTabs: allTabs,
   });
 }
 
@@ -690,6 +691,7 @@ export async function previewLedgerFromParams(params: {
   return previewLedger(orderTables, paymentTable, params.orderMapping, params.paymentMapping, {
     requireLiveLink: params.requireLiveLink ?? true,
     defaultCurrency: params.defaultCurrency || 'PKR',
+    allSheetTabs: allTabs,
   });
 }
 

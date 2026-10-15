@@ -1,6 +1,7 @@
 import { cleanUrl, normalizeDomain } from '@/lib/domain';
 import { cellText, parseDate, parseIndexStatus, parseMoney, parseTime } from '@/lib/parse';
 import { colIndex, type SheetTable } from '@/lib/sheets-types';
+import { LEDGER_ORDER_FIELDS, LEDGER_PAYMENT_FIELDS } from '@/lib/fields';
 
 export type InferredMonth = {
   month: number; // 1 - 12
@@ -14,7 +15,8 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const MONTH_REGEX = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
+// Matches full and short month names delimited by non-letters (handles underscores, spaces, hyphens, and numbers like August2026, Aug_Links, 08-August)
+export const MONTH_REGEX = /(?:^|[^a-z])(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:$|[^a-z])/i;
 
 function monthIndex(token: string): number {
   const t = token.toLowerCase();
@@ -42,20 +44,37 @@ export function getKarachiCurrentYear(): number {
 }
 
 /**
- * Infer month and year from a tab name (e.g. "August Links", "July", "Sept", "Oct 2026").
- * Returns null if the tab name does not contain a recognizable month word.
+ * Infer month and year from a tab name (e.g. "August Links", "August_Links", "August2026", "July", "Sept", "Oct 2026").
+ * Returns null if the tab name does not contain a recognizable month word, or if it is a payment/summary tab.
  */
 export function inferMonthFromTabName(name: string, referenceYear?: number): InferredMonth | null {
   if (!name) return null;
-  const match = name.match(MONTH_REGEX);
+  const clean = name.trim();
+
+  // Explicit non-month tabs (payment, summary, balance, master price lists)
+  if (/payment/i.test(clean)) return null;
+  if (/history|remaining|balance|summary|total|master|rate|price/i.test(clean) && !/(?:^|[^a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(clean)) {
+    return null;
+  }
+
+  const match = clean.match(MONTH_REGEX);
   if (!match) return null;
 
   const m = monthIndex(match[1]);
   if (!m) return null;
 
-  // Check if tab name explicitly contains a 4-digit year (e.g. "August 2026")
-  const yearMatch = name.match(/\b(20\d{2})\b/);
-  const year = yearMatch ? Number(yearMatch[1]) : (referenceYear || getKarachiCurrentYear());
+  // Extract year:
+  // 1. 4-digit year like "2026" or "August2026"
+  const y4Match = clean.match(/(?:^|[^0-9])(20\d{2})(?:$|[^0-9])/);
+  // 2. 2-digit year like "24", "25", "26" preceded/followed by non-digits
+  const y2Match = !y4Match ? clean.match(/(?:^|[\s_/-])(2[3-9]|3[0-9])(?:$|[\s_/-])/) : null;
+
+  const year = y4Match
+    ? Number(y4Match[1])
+    : y2Match
+    ? 2000 + Number(y2Match[1])
+    : (referenceYear || getKarachiCurrentYear());
+
   const monthStart = `${year}-${String(m).padStart(2, '0')}-01`;
 
   return {
@@ -124,6 +143,21 @@ export type LedgerPaymentRecord = {
   notes: string | null;
 };
 
+export type TabDiagnostic = {
+  tab: string;
+  type: 'order' | 'payment' | 'ignored';
+  monthYear?: string | null; // e.g. "August 2026"
+  monthStart?: string | null; // e.g. "2026-08-01"
+  linksCount?: number;
+  totalPKR?: number;
+  skippedNoLink?: number;
+  noPriceCount?: number;
+  duplicateCount?: number;
+  paymentCount?: number;
+  totalPaidPKR?: number;
+  reason?: string;
+};
+
 export type ParsedLedger = {
   tabsRead: string[];
   orders: LedgerOrderRecord[];
@@ -134,9 +168,50 @@ export type ParsedLedger = {
   payments: LedgerPaymentRecord[];
   totalPaidPKR: number;
   resultingBalance: number;
+  tabDiagnostics?: TabDiagnostic[];
 };
 
 const cell = (row: unknown[], idx: number): unknown => (idx >= 0 ? row[idx] : undefined);
+
+function resolveOrderCol(headers: string[], mapped: string | undefined, fieldKey: string): number {
+  const fromMapping = colIndex(headers, mapped);
+  if (fromMapping >= 0) return fromMapping;
+  const def = LEDGER_ORDER_FIELDS.find((f) => f.key === fieldKey);
+  if (!def) return -1;
+  return headers.findIndex((h) => def.guess.test(h));
+}
+
+function resolvePaymentCol(headers: string[], mapped: string | undefined, fieldKey: string): number {
+  if (fieldKey === 'amount') {
+    if (mapped && /remain|balance|total|due|left/i.test(mapped)) {
+      mapped = undefined;
+    }
+  }
+  const fromMapping = colIndex(headers, mapped);
+  if (fromMapping >= 0) return fromMapping;
+
+  if (fieldKey === 'amount') {
+    return headers.findIndex(
+      (h) => !/remain|balance|total|due|left/i.test(h) && /(?:^|\b)(amount|paid|payment)(?:\b|$)/i.test(h)
+    );
+  }
+  if (fieldKey === 'date') {
+    return headers.findIndex((h) => /^date$|paid\s*date|payment\s*date/i.test(h) || (/date/i.test(h) && !/time/i.test(h)));
+  }
+  if (fieldKey === 'time') {
+    return headers.findIndex((h) => /time/i.test(h));
+  }
+  if (fieldKey === 'method') {
+    return headers.findIndex((h) => /method|mode|via|channel|account/i.test(h));
+  }
+  if (fieldKey === 'reference') {
+    return headers.findIndex((h) => /ref|txn|trx|transaction|receipt/i.test(h));
+  }
+  if (fieldKey === 'notes') {
+    return headers.findIndex((h) => /note|comment|remark|detail/i.test(h));
+  }
+  return -1;
+}
 
 /**
  * Pure parsing of order rows from month tabs.
@@ -156,6 +231,7 @@ export function parseLedgerOrders(
   noPriceCount: number;
   duplicateCount: number;
   usedTabs: string[];
+  tabDiagnostics: TabDiagnostic[];
 } {
   const requireLive = options.requireLiveLink ?? true;
   const currency = options.defaultCurrency || 'PKR';
@@ -165,7 +241,7 @@ export function parseLedgerOrders(
   if (!refYear) {
     const years: number[] = [];
     for (const t of tables) {
-      const dateIdx = colIndex(t.headers, mapping.date);
+      const dateIdx = resolveOrderCol(t.headers, mapping.date, 'date');
       if (dateIdx >= 0) {
         for (const r of t.body) {
           const d = parseDate(cell(r, dateIdx));
@@ -174,7 +250,6 @@ export function parseLedgerOrders(
       }
     }
     if (years.length) {
-      // most common year
       const counts = new Map<number, number>();
       for (const y of years) counts.set(y, (counts.get(y) ?? 0) + 1);
       refYear = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0][0];
@@ -184,41 +259,50 @@ export function parseLedgerOrders(
   }
 
   const ordersMap = new Map<string, LedgerOrderRecord>();
-  let skippedNoLink = 0;
-  let noPriceCount = 0;
-  let duplicateCount = 0;
+  let overallSkippedNoLink = 0;
+  let overallNoPrice = 0;
+  let overallDuplicates = 0;
   const usedTabs: string[] = [];
+  const tabDiagnostics: TabDiagnostic[] = [];
 
   for (const t of tables) {
     usedTabs.push(t.tab);
     const inferred = inferMonthFromTabName(t.tab, refYear);
 
     const idx = {
-      site: colIndex(t.headers, mapping.site),
-      price: colIndex(t.headers, mapping.price),
-      date: colIndex(t.headers, mapping.date),
-      article: colIndex(t.headers, mapping.article),
-      live: colIndex(t.headers, mapping.live_url),
-      status: colIndex(t.headers, mapping.status),
-      pair: colIndex(t.headers, mapping.pair),
-      notes: colIndex(t.headers, mapping.notes),
-      payment_status: colIndex(t.headers, mapping.payment_status),
+      live: resolveOrderCol(t.headers, mapping.live_url, 'live_url'),
+      site: resolveOrderCol(t.headers, mapping.site, 'site'),
+      price: resolveOrderCol(t.headers, mapping.price, 'price'),
+      date: resolveOrderCol(t.headers, mapping.date, 'date'),
+      article: resolveOrderCol(t.headers, mapping.article, 'article'),
+      status: resolveOrderCol(t.headers, mapping.status, 'status'),
+      pair: resolveOrderCol(t.headers, mapping.pair, 'pair'),
+      notes: resolveOrderCol(t.headers, mapping.notes, 'notes'),
+      payment_status: resolveOrderCol(t.headers, mapping.payment_status, 'payment_status'),
     };
+
+    let tabLinksCount = 0;
+    let tabTotalPKR = 0;
+    let tabSkippedNoLink = 0;
+    let tabNoPrice = 0;
+    let tabDuplicates = 0;
 
     for (const r of t.body) {
       const rawLive = cell(r, idx.live);
       const live = cleanUrl(rawLive);
 
-      // Section 2 & 3: Skip every row where the Live link cell is not a valid URL
-      if (requireLive && (!live || !normalizeDomain(live))) {
-        skippedNoLink++;
+      // Rule: Skip every row where the Live link cell is not a valid URL
+      if (!live || !normalizeDomain(live)) {
+        tabSkippedNoLink++;
+        overallSkippedNoLink++;
         continue;
       }
 
       const rawSite = cell(r, idx.site);
       const domain = normalizeDomain(rawSite) ?? (live ? normalizeDomain(live) : null);
       if (!domain) {
-        skippedNoLink++;
+        tabSkippedNoLink++;
+        overallSkippedNoLink++;
         continue;
       }
 
@@ -226,10 +310,13 @@ export function parseLedgerOrders(
       const priceRaw = cell(r, idx.price);
       const price = parseMoney(priceRaw);
       if (price === null) {
-        noPriceCount++;
+        tabNoPrice++;
+        overallNoPrice++;
       }
 
       const date = parseDate(cell(r, idx.date));
+      // Rule: If tab has an inferred month, all rows from this tab inherit it!
+      // order_month is always the first day of that month (YYYY-MM-01).
       const orderMonth = inferred ? inferred.monthStart : (date ? `${date.slice(0, 7)}-01` : null);
 
       const doc = cellText(cell(r, idx.article));
@@ -238,17 +325,22 @@ export function parseLedgerOrders(
       const paymentStatus = cellText(cell(r, idx.payment_status));
       const st = parseIndexStatus(cell(r, idx.status));
 
-      const key = live ? `u:${live.toLowerCase()}` : `d:${domain}|${date ?? ''}#${ordersMap.size + 1}`;
-
+      const key = `u:${live.toLowerCase()}`;
       if (ordersMap.has(key)) {
-        duplicateCount++;
+        tabDuplicates++;
+        overallDuplicates++;
+      }
+
+      tabLinksCount++;
+      if (price !== null && price > 0) {
+        tabTotalPKR += price;
       }
 
       ordersMap.set(key, {
         source_key: key,
         source_tab: t.tab,
         domain,
-        live_url: live || '',
+        live_url: live,
         order_date: date,
         order_month: orderMonth,
         price_paid: price,
@@ -261,6 +353,18 @@ export function parseLedgerOrders(
         payment_status: paymentStatus,
       });
     }
+
+    tabDiagnostics.push({
+      tab: t.tab,
+      type: 'order',
+      monthYear: inferred ? `${inferred.monthName} ${inferred.year}` : null,
+      monthStart: inferred ? inferred.monthStart : null,
+      linksCount: tabLinksCount,
+      totalPKR: tabTotalPKR,
+      skippedNoLink: tabSkippedNoLink,
+      noPriceCount: tabNoPrice,
+      duplicateCount: tabDuplicates,
+    });
   }
 
   const orders = Array.from(ordersMap.values());
@@ -269,10 +373,11 @@ export function parseLedgerOrders(
   return {
     orders,
     totalOrderedPKR,
-    skippedNoLink,
-    noPriceCount,
-    duplicateCount,
+    skippedNoLink: overallSkippedNoLink,
+    noPriceCount: overallNoPrice,
+    duplicateCount: overallDuplicates,
     usedTabs,
+    tabDiagnostics,
   };
 }
 
@@ -287,21 +392,30 @@ export function parseLedgerPayments(
 ): {
   payments: LedgerPaymentRecord[];
   totalPaidPKR: number;
+  skippedCount: number;
+  diagnostic: TabDiagnostic | null;
 } {
-  if (!table || !table.body.length) return { payments: [], totalPaidPKR: 0 };
+  if (!table || !table.body.length) {
+    return {
+      payments: [],
+      totalPaidPKR: 0,
+      skippedCount: 0,
+      diagnostic: table ? { tab: table.tab, type: 'payment', paymentCount: 0, totalPaidPKR: 0, reason: 'Empty table' } : null,
+    };
+  }
 
-  // Verify headers don't map balance/remaining columns
   const idx = {
-    amount: colIndex(table.headers, paymentMapping.amount),
-    date: colIndex(table.headers, paymentMapping.date),
-    time: colIndex(table.headers, paymentMapping.time),
-    method: colIndex(table.headers, paymentMapping.method),
-    reference: colIndex(table.headers, paymentMapping.reference),
-    notes: colIndex(table.headers, paymentMapping.notes),
+    amount: resolvePaymentCol(table.headers, paymentMapping.amount, 'amount'),
+    date: resolvePaymentCol(table.headers, paymentMapping.date, 'date'),
+    time: resolvePaymentCol(table.headers, paymentMapping.time, 'time'),
+    method: resolvePaymentCol(table.headers, paymentMapping.method, 'method'),
+    reference: resolvePaymentCol(table.headers, paymentMapping.reference, 'reference'),
+    notes: resolvePaymentCol(table.headers, paymentMapping.notes, 'notes'),
   };
 
   const records: LedgerPaymentRecord[] = [];
   const seen = new Map<string, number>();
+  let skippedCount = 0;
 
   for (const r of table.body) {
     const amount = parseMoney(cell(r, idx.amount));
@@ -309,6 +423,7 @@ export function parseLedgerPayments(
 
     // Ignore rows that are not real payments (no date, or amount missing / <= 0, or label rows like "Total")
     if (amount === null || amount <= 0 || !date) {
+      skippedCount++;
       continue;
     }
 
@@ -335,7 +450,15 @@ export function parseLedgerPayments(
   }
 
   const totalPaidPKR = records.reduce((sum, p) => sum + p.amount, 0);
-  return { payments: records, totalPaidPKR };
+  const diagnostic: TabDiagnostic = {
+    tab: table.tab,
+    type: 'payment',
+    paymentCount: records.length,
+    totalPaidPKR,
+    reason: skippedCount > 0 ? `${skippedCount} non-payment/summary rows skipped` : undefined,
+  };
+
+  return { payments: records, totalPaidPKR, skippedCount, diagnostic };
 }
 
 /**
@@ -349,10 +472,33 @@ export function previewLedger(
   options: {
     requireLiveLink?: boolean;
     defaultCurrency?: string;
+    allSheetTabs?: string[];
   } = {}
 ): ParsedLedger {
   const parsedOrders = parseLedgerOrders(orderTables, orderMapping, options);
   const parsedPayments = parseLedgerPayments(paymentTable, paymentMapping, options.defaultCurrency);
+
+  const tabDiagnostics: TabDiagnostic[] = [...parsedOrders.tabDiagnostics];
+  if (parsedPayments.diagnostic) {
+    tabDiagnostics.push(parsedPayments.diagnostic);
+  }
+
+  // Include ignored tabs if full sheet tabs list was provided
+  if (options.allSheetTabs) {
+    const processedTabs = new Set([
+      ...parsedOrders.usedTabs,
+      ...(paymentTable ? [paymentTable.tab] : []),
+    ]);
+    for (const t of options.allSheetTabs) {
+      if (!processedTabs.has(t)) {
+        tabDiagnostics.push({
+          tab: t,
+          type: 'ignored',
+          reason: 'Ignored: name does not contain a recognized month name',
+        });
+      }
+    }
+  }
 
   return {
     tabsRead: parsedOrders.usedTabs,
@@ -364,5 +510,6 @@ export function previewLedger(
     payments: parsedPayments.payments,
     totalPaidPKR: parsedPayments.totalPaidPKR,
     resultingBalance: parsedOrders.totalOrderedPKR - parsedPayments.totalPaidPKR,
+    tabDiagnostics,
   };
 }
